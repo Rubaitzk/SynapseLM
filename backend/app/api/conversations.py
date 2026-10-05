@@ -78,6 +78,12 @@ def add_participant(
 ):
     conv = check_conversation_access(db, conversation_id, current_user.id)
     
+    # Verify that the current user is an admin or owner of the team
+    from app.models.team import Role
+    current_membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+    if not current_membership or current_membership.role not in [Role.owner, Role.admin]:
+        raise HTTPException(status_code=403, detail="Not enough permissions to add participants")
+
     # Verify target user is in the team
     membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=user_id)
     if not membership:
@@ -96,7 +102,15 @@ def remove_participant(
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
-    check_conversation_access(db, conversation_id, current_user.id)
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    
+    # If a user is not removing themselves, they must be an admin/owner
+    if current_user.id != user_id:
+        from app.models.team import Role
+        current_membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+        if not current_membership or current_membership.role not in [Role.owner, Role.admin]:
+            raise HTTPException(status_code=403, detail="Not enough permissions to remove participants")
+
     crud_conversation.remove_participant(db, conversation_id, user_id)
     return None
 
