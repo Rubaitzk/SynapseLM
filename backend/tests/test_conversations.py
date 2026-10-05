@@ -37,9 +37,10 @@ def test_conversation_flow(client):
     res = client.get(f"/api/conversations/{conv_id}/messages?page=1&size=10", headers=h1)
     assert res.status_code == 200
     data = res.json()
-    assert data["total"] == 1
+    assert data["total"] == 2
     assert data["items"][0]["content"] == "Hello team!"
     assert data["items"][0]["sender_type"] == "user"
+    assert data["items"][1]["sender_type"] == "assistant"
 
 def test_participant_management(client):
     # Setup users

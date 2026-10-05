@@ -123,7 +123,15 @@ def send_message(
     current_user = Depends(deps.get_current_user),
 ):
     check_conversation_access(db, conversation_id, current_user.id)
-    return crud_conversation.create_message(db, conversation_id, message_in, sender_id=current_user.id)
+    
+    # 1. Persist user message
+    user_msg = crud_conversation.create_message(db, conversation_id, message_in, sender_id=current_user.id)
+    
+    # 2. Trigger AI orchestrator (blocks until response is generated)
+    from app.services.llm.orchestrator import generate_assistant_response
+    generate_assistant_response(db, conversation_id)
+    
+    return user_msg
 
 @router.get("/{conversation_id}/messages", response_model=PaginatedMessages)
 def get_messages(
