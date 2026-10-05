@@ -61,10 +61,12 @@ def invite_member(
 
     # check if user is already a member
     user = crud_user.get_user_by_email(db, email=invitation_in.invitee_email)
-    if user:
-        existing_membership = crud_team.get_team_membership(db, team_id=team_id, user_id=user.id)
-        if existing_membership:
-            raise HTTPException(status_code=400, detail="User is already a member of this team")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found. They must register an account first.")
+        
+    existing_membership = crud_team.get_team_membership(db, team_id=team_id, user_id=user.id)
+    if existing_membership:
+        raise HTTPException(status_code=400, detail="User is already a member of this team")
 
     # check for duplicate pending invitation
     existing_invite = crud_team.get_pending_invitation_by_email(db, team_id=team_id, email=invitation_in.invitee_email)

@@ -14,7 +14,7 @@ export default function Teams() {
 
   const fetchTeams = async () => {
     try {
-      const response = await api.get('/teams');
+      const response = await api.get('/teams/');
       setTeams(response.data);
     } catch (err) {
       console.error(err);
