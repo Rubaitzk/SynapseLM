@@ -48,6 +48,20 @@ def get_team_members(
         raise HTTPException(status_code=403, detail="Not a member of this team")
     return crud_team.get_team_members(db, team_id=team_id)
 
+from app.crud import crud_conversation
+from app.schemas.conversation import ConversationResponse
+
+@router.get("/{team_id}/conversations", response_model=List[ConversationResponse])
+def get_team_conversations(
+    team_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    membership = crud_team.get_team_membership(db, team_id=team_id, user_id=current_user.id)
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this team")
+    return crud_conversation.get_team_conversations(db, team_id=team_id, user_id=current_user.id)
+
 @router.post("/{team_id}/invitations", response_model=InvitationResponse)
 def invite_member(
     team_id: str,
