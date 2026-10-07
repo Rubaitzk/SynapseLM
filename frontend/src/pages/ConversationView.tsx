@@ -99,8 +99,15 @@ export default function ConversationView() {
             });
           } else if (data.event === 'message.created') {
              setMessages(prev => {
-               if (prev.find(m => m.id === data.message.id)) return prev;
-               return [...prev, data.message];
+               const exists = prev.find(m => m.id === data.message.id);
+               let next;
+               if (exists) {
+                 next = prev.map(m => m.id === data.message.id ? data.message : m);
+               } else {
+                 next = [...prev, data.message];
+               }
+               // Sort by created_at to maintain canonical ordering
+               return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
              });
           } else if (data.event === 'assistant.response.started') {
              setStreamingMessages(prev => ({...prev, [data.message_id]: {content: ''}}));
@@ -113,7 +120,10 @@ export default function ConversationView() {
              }));
              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
           } else if (data.event === 'assistant.response.completed') {
-             setMessages(prev => [...prev, data.message]);
+             setMessages(prev => {
+               const next = [...prev, data.message];
+               return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+             });
              setStreamingMessages(prev => {
                const next = {...prev};
                delete next[data.message_id];
@@ -171,9 +181,21 @@ export default function ConversationView() {
     stopTyping();
     
     try {
-      await api.post(`/conversations/${id}/messages`, { content });
+      const res = await api.post(`/conversations/${id}/messages`, { content });
       setContent('');
-      // Message will be added via websocket broadcast
+      
+      // Immediately display our own message via REST response
+      // This guarantees the sender sees it instantly even if WS is slow
+      setMessages(prev => {
+         const exists = prev.find(m => m.id === res.data.id);
+         let next;
+         if (exists) {
+           next = prev.map(m => m.id === res.data.id ? res.data : m);
+         } else {
+           next = [...prev, res.data];
+         }
+         return next.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      });
     } catch (err) {
       console.error(err);
     }

@@ -5,8 +5,8 @@ from app.services.llm.provider import LLMProvider
 from app.services.llm.mock_provider import MockProvider
 from app.services.llm.context import build_system_instruction, build_message_history
 from app.crud import crud_conversation
-from app.schemas.conversation import MessageCreate
 from app.models.conversation import SenderType
+from app.schemas.conversation import MessageCreate, MessageResponse
 
 def get_provider() -> LLMProvider:
     if settings.LLM_PROVIDER.lower() == "openai":
@@ -83,17 +83,13 @@ async def generate_assistant_response(db: Session, conversation_id: str) -> Opti
         sender_type=SenderType.assistant
     )
     
+    message_data = MessageResponse.model_validate(msg).model_dump(mode='json')
+    
     await manager.broadcast_to_conversation(conversation_id, {
         "event": "assistant.response.completed",
         "conversation_id": conversation_id,
         "message_id": response_id,
-        "message": {
-            "id": msg.id,
-            "content": msg.content,
-            "sender_id": msg.sender_id,
-            "sender_type": msg.sender_type.value,
-            "created_at": msg.created_at.isoformat()
-        }
+        "message": message_data
     })
     
     return content

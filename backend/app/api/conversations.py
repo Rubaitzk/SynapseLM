@@ -132,18 +132,14 @@ async def send_message(
     # 1. Persist user message
     user_msg = crud_conversation.create_message(db, conversation_id, message_in, sender_id=current_user.id)
     
+    message_data = MessageResponse.model_validate(user_msg).model_dump(mode='json')
+    
     # 1.5 Broadcast message
     # We use asyncio.create_task to run this without blocking, or await it
     await manager.broadcast_to_conversation(conversation_id, {
         "event": "message.created",
         "conversation_id": conversation_id,
-        "message": {
-            "id": user_msg.id,
-            "content": user_msg.content,
-            "sender_id": user_msg.sender_id,
-            "sender_type": user_msg.sender_type.value,
-            "created_at": user_msg.created_at.isoformat()
-        }
+        "message": message_data
     })
     
     # 2. Trigger AI orchestrator in background
