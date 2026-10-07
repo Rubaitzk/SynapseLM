@@ -14,6 +14,7 @@ export default function ConversationView() {
   const [selectedUser, setSelectedUser] = useState('');
   
   // Realtime state
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting' | 'offline'>('connecting');
   const ws = useRef<WebSocket | null>(null);
   const [activeUsers, setActiveUsers] = useState<Record<string, boolean>>({});
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
@@ -81,6 +82,10 @@ export default function ConversationView() {
       const wsUrl = `ws://localhost:8000/ws/${id}?token=${token}`;
       ws.current = new WebSocket(wsUrl);
       
+      ws.current.onopen = () => {
+        setConnectionStatus('connected');
+      };
+
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -144,13 +149,16 @@ export default function ConversationView() {
       };
       
       ws.current.onclose = () => {
+        setConnectionStatus('reconnecting');
         reconnectTimer = setTimeout(() => {
            fetchPresence();
+           fetchMessages();
            connectWs();
         }, 2000);
       };
     };
     
+    setConnectionStatus('connecting');
     connectWs();
     
     return () => {
@@ -260,6 +268,12 @@ export default function ConversationView() {
             &larr; Back to Team
           </Link>
           <h2 className="text-xl font-bold">{conversation.title}</h2>
+          
+          <div className="ml-auto text-sm flex items-center gap-2">
+            {connectionStatus === 'connected' && <><span className="w-2 h-2 rounded-full bg-green-500"></span><span className="text-gray-500">Connected</span></>}
+            {connectionStatus === 'reconnecting' && <><span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span><span className="text-gray-500">Reconnecting...</span></>}
+            {connectionStatus === 'connecting' && <><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span><span className="text-gray-500">Connecting...</span></>}
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
