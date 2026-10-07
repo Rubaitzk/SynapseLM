@@ -114,11 +114,16 @@ def remove_participant(
     crud_conversation.remove_participant(db, conversation_id, user_id)
     return None
 
+from fastapi import BackgroundTasks
+from app.core.realtime import manager
+import asyncio
+
 # Messages
 @router.post("/{conversation_id}/messages", response_model=MessageResponse)
-def send_message(
+async def send_message(
     conversation_id: str,
     message_in: MessageCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
@@ -127,14 +132,28 @@ def send_message(
     # 1. Persist user message
     user_msg = crud_conversation.create_message(db, conversation_id, message_in, sender_id=current_user.id)
     
-    # 2. Trigger AI orchestrator (blocks until response is generated)
+    # 1.5 Broadcast message
+    # We use asyncio.create_task to run this without blocking, or await it
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "message.created",
+        "conversation_id": conversation_id,
+        "message": {
+            "id": user_msg.id,
+            "content": user_msg.content,
+            "sender_id": user_msg.sender_id,
+            "sender_type": user_msg.sender_type.value,
+            "created_at": user_msg.created_at.isoformat()
+        }
+    })
+    
+    # 2. Trigger AI orchestrator in background
     from app.services.llm.orchestrator import generate_assistant_response
-    generate_assistant_response(db, conversation_id)
+    background_tasks.add_task(generate_assistant_response, db, conversation_id)
     
     return user_msg
 
 @router.get("/{conversation_id}/messages", response_model=PaginatedMessages)
-def get_messages(
+async def get_messages(
     conversation_id: str,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
@@ -151,3 +170,21 @@ def get_messages(
         "size": size,
         "items": items
     }
+
+@router.get("/{conversation_id}/presence")
+async def get_conversation_presence(
+    conversation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user)
+):
+    check_conversation_access(db, conversation_id, current_user.id)
+    active_users = []
+    conns = manager.conversation_subscriptions.get(conversation_id, [])
+    user_ids = set()
+    for c_id in conns:
+        uid = manager.connection_users.get(c_id)
+        if uid and uid not in user_ids:
+            user_ids.add(uid)
+            active_users.append(manager.user_info[uid])
+            
+    return {"active_users": active_users}
