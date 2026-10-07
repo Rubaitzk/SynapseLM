@@ -47,16 +47,47 @@ def get_conversation(
 ):
     return check_conversation_access(db, conversation_id, current_user.id)
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_conversation(
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+def update_conversation(
     conversation_id: str,
+    conv_in: __import__('app.schemas.conversation', fromlist=['ConversationUpdate']).ConversationUpdate,
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
     conv = check_conversation_access(db, conversation_id, current_user.id)
     
-    # In a real app, only owner/admin might be able to delete. For now, any participant can.
+    # Check if user is owner/admin of the team to modify AI config
+    from app.models.team import Role
+    membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+    if not membership or membership.role not in [Role.owner, Role.admin]:
+        raise HTTPException(status_code=403, detail="Not authorized to modify conversation settings")
+        
+    conv = crud_conversation.update_conversation(db, conv, conv_in)
+    return conv
+
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    conversation_id: str,
+    background_tasks: __import__('fastapi').BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    
+    # Restrict to owner/admin
+    from app.models.team import Role
+    membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+    if not membership or membership.role not in [Role.owner, Role.admin]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete conversation")
+        
     crud_conversation.delete_conversation(db, conversation_id)
+    
+    # Broadcast deletion to kick any active websockets
+    await __import__('app.core.realtime', fromlist=['manager']).manager.broadcast_to_conversation(conversation_id, {
+        "event": "conversation.deleted",
+        "conversation_id": conversation_id
+    })
+    
     return None
 
 # Participants
@@ -96,7 +127,7 @@ def add_participant(
     return crud_conversation.add_participant(db, conversation_id, user_id)
 
 @router.delete("/{conversation_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_participant(
+async def remove_participant(
     conversation_id: str,
     user_id: str,
     db: Session = Depends(deps.get_db),
@@ -112,6 +143,14 @@ def remove_participant(
             raise HTTPException(status_code=403, detail="Not enough permissions to remove participants")
 
     crud_conversation.remove_participant(db, conversation_id, user_id)
+    
+    # Broadcast to kick active websocket if they are connected
+    await __import__('app.core.realtime', fromlist=['manager']).manager.broadcast_to_conversation(conversation_id, {
+        "event": "participant.removed",
+        "conversation_id": conversation_id,
+        "user_id": user_id
+    })
+    
     return None
 
 from fastapi import BackgroundTasks

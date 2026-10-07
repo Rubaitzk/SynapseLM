@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
-from app.models.conversation import SenderType
+from app.models.conversation import SenderType, ExecutionTarget
 from app.schemas.user import UserResponse
 
 class ConversationBase(BaseModel):
@@ -9,12 +9,29 @@ class ConversationBase(BaseModel):
     team_id: str
 
 class ConversationCreate(ConversationBase):
-    pass
+    ai_provider: Optional[str] = "gemini"
+    ai_model: Optional[str] = "gemini-1.5-flash"
+    ai_execution_target: Optional[ExecutionTarget] = ExecutionTarget.hosted
+    ai_system_instructions: Optional[str] = None
+    ai_temperature: Optional[float] = 0.7
+
+class ConversationUpdate(BaseModel):
+    title: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_execution_target: Optional[ExecutionTarget] = None
+    ai_system_instructions: Optional[str] = None
+    ai_temperature: Optional[float] = None
 
 class ConversationResponse(ConversationBase):
     id: str
     created_at: datetime
     updated_at: datetime
+    ai_provider: str
+    ai_model: str
+    ai_execution_target: ExecutionTarget
+    ai_system_instructions: Optional[str] = None
+    ai_temperature: float
 
     class Config:
         from_attributes = True

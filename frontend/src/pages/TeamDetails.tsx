@@ -58,6 +58,17 @@ export default function TeamDetails() {
     }
   };
 
+  const handleRemoveMember = async (userId: string) => {
+    if (!window.confirm("Remove this member from the team? They will also be removed from all conversations in this team.")) return;
+    try {
+      await api.delete(`/teams/${id}/members/${userId}`);
+      fetchDetails();
+    } catch (err: any) {
+      console.error(err);
+      setError(err.response?.data?.detail || 'Failed to remove member');
+    }
+  };
+
   if (!team) return <div className="p-8">Loading...</div>;
 
   return (
@@ -69,8 +80,6 @@ export default function TeamDetails() {
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border dark:border-gray-700">
         <h3 className="text-xl font-semibold mb-4">Conversations</h3>
-        {error && <div className="p-3 mb-4 text-sm text-red-500 bg-red-100 rounded">{error}</div>}
-        {success && <div className="p-3 mb-4 text-sm text-green-700 bg-green-100 rounded">{success}</div>}
         
         <form onSubmit={handleCreateConv} className="flex gap-4 mb-6">
           <input
@@ -102,8 +111,6 @@ export default function TeamDetails() {
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border dark:border-gray-700">
         <h3 className="text-xl font-semibold mb-4">Invite Member</h3>
-        {error && <div className="p-3 mb-4 text-sm text-red-500 bg-red-100 rounded">{error}</div>}
-        {success && <div className="p-3 mb-4 text-sm text-green-700 bg-green-100 rounded">{success}</div>}
         
         <form onSubmit={handleInvite} className="flex gap-4">
           <input
@@ -122,13 +129,23 @@ export default function TeamDetails() {
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border dark:border-gray-700">
         <h3 className="text-xl font-semibold mb-4">Members</h3>
+        {error && <div className="p-3 mb-4 text-sm text-red-500 bg-red-100 rounded">{error}</div>}
+        {success && <div className="p-3 mb-4 text-sm text-green-700 bg-green-100 rounded">{success}</div>}
         <ul className="space-y-3">
           {members.map(m => (
             <li key={m.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900 rounded border dark:border-gray-700">
               <span>{m.user?.username || m.user_id}</span>
-              <span className="px-2 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 uppercase">
-                {m.role}
-              </span>
+              <div className="flex items-center gap-4">
+                <span className="px-2 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 uppercase">
+                  {m.role}
+                </span>
+                <button 
+                  onClick={() => handleRemoveMember(m.user_id)}
+                  className="text-xs text-red-600 hover:text-red-800 font-semibold"
+                >
+                  Remove
+                </button>
+              </div>
             </li>
           ))}
         </ul>

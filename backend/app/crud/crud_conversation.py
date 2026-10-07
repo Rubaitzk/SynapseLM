@@ -5,7 +5,15 @@ from app.models.conversation import Conversation, ConversationParticipant, Messa
 from app.schemas.conversation import ConversationCreate, MessageCreate
 
 def create_conversation(db: Session, conv_in: ConversationCreate, creator_id: str) -> Conversation:
-    db_conv = Conversation(title=conv_in.title, team_id=conv_in.team_id)
+    db_conv = Conversation(
+        title=conv_in.title, 
+        team_id=conv_in.team_id,
+        ai_provider=conv_in.ai_provider,
+        ai_model=conv_in.ai_model,
+        ai_execution_target=conv_in.ai_execution_target,
+        ai_system_instructions=conv_in.ai_system_instructions,
+        ai_temperature=conv_in.ai_temperature
+    )
     db.add(db_conv)
     db.commit()
     db.refresh(db_conv)
@@ -16,6 +24,15 @@ def create_conversation(db: Session, conv_in: ConversationCreate, creator_id: st
 
 def get_conversation(db: Session, conversation_id: str) -> Optional[Conversation]:
     return db.query(Conversation).filter(Conversation.id == conversation_id).first()
+
+def update_conversation(db: Session, db_conv: Conversation, conv_in) -> Conversation:
+    update_data = conv_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_conv, field, value)
+    db.add(db_conv)
+    db.commit()
+    db.refresh(db_conv)
+    return db_conv
 
 def get_team_conversations(db: Session, team_id: str, user_id: str) -> List[Conversation]:
     # Only return conversations the user is participating in

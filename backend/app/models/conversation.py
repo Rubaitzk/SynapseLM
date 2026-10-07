@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, Enum, Text
+from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, Enum, Text, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
 import enum
@@ -10,6 +10,11 @@ class SenderType(str, enum.Enum):
     assistant = "assistant"
     system = "system"
 
+class ExecutionTarget(str, enum.Enum):
+    hosted = "hosted"
+    local_runtime = "local_runtime"
+    team_runtime = "team_runtime"
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -18,6 +23,13 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # AI Configuration
+    ai_provider: Mapped[str] = mapped_column(String, nullable=False, default="mock")
+    ai_model: Mapped[str] = mapped_column(String, nullable=False, default="default")
+    ai_execution_target: Mapped[ExecutionTarget] = mapped_column(Enum(ExecutionTarget), nullable=False, default=ExecutionTarget.hosted)
+    ai_system_instructions: Mapped[str] = mapped_column(Text, nullable=True)
+    ai_temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
 
     team = relationship("Team")
     participants = relationship("ConversationParticipant", back_populates="conversation", cascade="all, delete-orphan")

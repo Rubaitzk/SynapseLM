@@ -1,23 +1,23 @@
 from typing import Optional
 from sqlalchemy.orm import Session
-from app.core.config import settings
 from app.services.llm.provider import LLMProvider
 from app.services.llm.mock_provider import MockProvider
 from app.services.llm.context import build_system_instruction, build_message_history
 from app.crud import crud_conversation
-from app.models.conversation import SenderType
+from app.models.conversation import SenderType, Conversation
 from app.schemas.conversation import MessageCreate, MessageResponse
-
-def get_provider() -> LLMProvider:
-    if settings.LLM_PROVIDER.lower() == "openai":
-        from app.services.llm.openai_provider import OpenAIProvider
-        return OpenAIProvider(api_key=settings.LLM_API_KEY, model=settings.LLM_MODEL)
-    else:
-        return MockProvider()
-
 import asyncio
 from app.core.realtime import manager
 import uuid
+
+def get_provider(conversation: Conversation) -> LLMProvider:
+    if conversation.ai_provider.lower() == "openai" or conversation.ai_provider.lower() == "gemini":
+        # we'll map gemini to the same openai provider for now (as it might be using the openai-compatible api)
+        from app.services.llm.openai_provider import OpenAIProvider
+        from app.core.config import settings
+        return OpenAIProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
+    else:
+        return MockProvider()
 
 async def generate_assistant_response(db: Session, conversation_id: str) -> Optional[str]:
     """
@@ -30,10 +30,14 @@ async def generate_assistant_response(db: Session, conversation_id: str) -> Opti
         
     # 1. Build context
     system_instruction = build_system_instruction(conversation)
+    # prepend conversation AI system instruction if provided
+    if conversation.ai_system_instructions:
+        system_instruction = f"{conversation.ai_system_instructions}\n\n{system_instruction}"
+        
     messages = build_message_history(db, conversation_id)
     
     # 2. Get provider
-    provider = get_provider()
+    provider = get_provider(conversation)
     
     response_id = str(uuid.uuid4())
     
@@ -43,13 +47,16 @@ async def generate_assistant_response(db: Session, conversation_id: str) -> Opti
         "message_id": response_id
     })
     
-    # 3. Generate response (we fake stream here if the provider doesn't support async stream natively)
-    # Wait, the provider is synchronous right now `generate_response`. 
-    # For Phase 5, we can just split the response into chunks and stream them.
+    # 3. Generate response
     content = ""
     try:
         # Run sync provider in thread pool to not block event loop
-        content = await asyncio.to_thread(provider.generate_response, system_instruction, messages)
+        content = await asyncio.to_thread(
+            provider.generate_response, 
+            system_instruction, 
+            messages,
+            temperature=conversation.ai_temperature
+        )
         
         # Fake streaming it out
         words = content.split(" ")

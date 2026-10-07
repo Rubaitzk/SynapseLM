@@ -90,3 +90,47 @@ def invite_member(
             raise HTTPException(status_code=400, detail="A pending invitation already exists for this email")
 
     return crud_team.create_invitation(db, invitation=invitation_in, team_id=team_id, inviter_id=current_user.id)
+
+@router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_team_member(
+    team_id: str,
+    user_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    # Check if current user is owner/admin
+    current_membership = crud_team.get_team_membership(db, team_id=team_id, user_id=current_user.id)
+    if not current_membership or (current_membership.role not in [Role.owner, Role.admin] and current_user.id != user_id):
+        raise HTTPException(status_code=403, detail="Not enough permissions to remove team members")
+
+    # Prevent removing the last owner (unless there's logic for it, keep it simple for now)
+    
+    membership = crud_team.get_team_membership(db, team_id=team_id, user_id=user_id)
+    if not membership:
+        raise HTTPException(status_code=404, detail="User is not a member of this team")
+
+    # Delete team membership
+    db.delete(membership)
+    
+    # Cascade: remove user from all conversations in this team
+    from app.models.conversation import Conversation, ConversationParticipant
+    participations = db.query(ConversationParticipant).join(Conversation).filter(
+        Conversation.team_id == team_id,
+        ConversationParticipant.user_id == user_id
+    ).all()
+    
+    for p in participations:
+        db.delete(p)
+        
+    db.commit()
+
+    # Broadcast participant removal to all affected conversations
+    manager = __import__('app.core.realtime', fromlist=['manager']).manager
+    for p in participations:
+        await manager.broadcast_to_conversation(p.conversation_id, {
+            "event": "participant.removed",
+            "conversation_id": p.conversation_id,
+            "user_id": user_id
+        })
+
+    return None

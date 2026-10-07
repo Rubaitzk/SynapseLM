@@ -8,7 +8,7 @@ class OpenAIProvider(LLMProvider):
         self.model = model
         self.client = openai.OpenAI(api_key=self.api_key)
         
-    def generate_response(self, system_instruction: str, messages: List[Dict[str, str]]) -> str:
+    def generate_response(self, system_instruction: str, messages: List[Dict[str, str]], **kwargs) -> str:
         payload = [{"role": "system", "content": system_instruction}]
         
         # Convert app format to OpenAI format
@@ -22,8 +22,12 @@ class OpenAIProvider(LLMProvider):
                     msg["name"] = safe_name
             payload.append(msg)
             
+        # extract known kwargs
+        temperature = kwargs.get('temperature', 0.7)
+            
         response = self.client.chat.completions.create(
             model=self.model,
             messages=payload,
+            temperature=temperature
         )
         return response.choices[0].message.content

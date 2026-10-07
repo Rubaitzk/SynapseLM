@@ -13,6 +13,15 @@ export default function ConversationView() {
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
   
+  const [showConfig, setShowConfig] = useState(false);
+  const [aiConfig, setAiConfig] = useState({
+    ai_provider: 'gemini',
+    ai_model: 'gemini-1.5-flash',
+    ai_execution_target: 'hosted',
+    ai_temperature: 0.7,
+    ai_system_instructions: ''
+  });
+  
   // Realtime state
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting' | 'offline'>('connecting');
   const ws = useRef<WebSocket | null>(null);
@@ -27,6 +36,13 @@ export default function ConversationView() {
     try {
       const res = await api.get(`/conversations/${id}`);
       setConversation(res.data);
+      setAiConfig({
+        ai_provider: res.data.ai_provider || 'gemini',
+        ai_model: res.data.ai_model || 'gemini-1.5-flash',
+        ai_execution_target: res.data.ai_execution_target || 'hosted',
+        ai_temperature: res.data.ai_temperature ?? 0.7,
+        ai_system_instructions: res.data.ai_system_instructions || ''
+      });
       
       const membersRes = await api.get(`/teams/${res.data.team_id}/members`);
       setTeamMembers(membersRes.data);
@@ -142,6 +158,17 @@ export default function ConversationView() {
                }
                return next;
              });
+          } else if (data.event === 'conversation.deleted') {
+             alert('This conversation has been deleted.');
+             window.location.href = '/';
+          } else if (data.event === 'participant.removed') {
+             const currentUserId = JSON.parse(atob(localStorage.getItem('token')!.split('.')[1])).sub;
+             if (data.user_id === currentUserId) {
+                 alert('You have been removed from this conversation.');
+                 window.location.href = '/';
+             } else {
+                 fetchParticipants();
+             }
           }
         } catch (e) {
           console.error("Failed to parse ws message", e);
@@ -243,6 +270,39 @@ export default function ConversationView() {
     }
   };
 
+  const handleRemoveParticipant = async (userId: string) => {
+    if (!window.confirm("Remove this participant from the conversation?")) return;
+    try {
+      await api.delete(`/conversations/${id}/participants/${userId}`);
+      fetchParticipants();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.detail || 'Failed to remove participant.');
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    try {
+      await api.patch(`/conversations/${id}`, aiConfig);
+      setShowConfig(false);
+      fetchConversation();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.detail || 'Failed to update configuration.');
+    }
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!window.confirm("Delete conversation? This will permanently remove this conversation and its messages.")) return;
+    try {
+      await api.delete(`/conversations/${id}`);
+      window.location.href = `/teams/${conversation.team_id}`;
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.detail || 'Failed to delete conversation.');
+    }
+  };
+
   if (!conversation) return <div className="p-8">Loading...</div>;
 
   const availableMembers = teamMembers.filter(
@@ -262,12 +322,19 @@ export default function ConversationView() {
   return (
     <div className="flex h-screen max-w-6xl mx-auto bg-gray-50 dark:bg-gray-900 border-x dark:border-gray-700">
       
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative">
         <header className="p-4 bg-white dark:bg-gray-800 shadow z-10 flex items-center gap-4">
           <Link to={`/teams/${conversation.team_id}`} className="text-blue-600 hover:underline">
             &larr; Back to Team
           </Link>
           <h2 className="text-xl font-bold">{conversation.title}</h2>
+          
+          <button 
+            onClick={() => setShowConfig(!showConfig)}
+            className="ml-4 px-3 py-1 text-sm bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100"
+          >
+            AI: {conversation.ai_provider} ({conversation.ai_model}) ▼
+          </button>
           
           <div className="ml-auto text-sm flex items-center gap-2">
             {connectionStatus === 'connected' && <><span className="w-2 h-2 rounded-full bg-green-500"></span><span className="text-gray-500">Connected</span></>}
@@ -275,6 +342,71 @@ export default function ConversationView() {
             {connectionStatus === 'connecting' && <><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span><span className="text-gray-500">Connecting...</span></>}
           </div>
         </header>
+
+        {showConfig && (
+          <div className="absolute top-16 left-0 right-0 z-20 flex justify-center">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border dark:border-gray-700 w-full max-w-md">
+              <h3 className="font-bold text-lg mb-4">AI Configuration</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Provider</label>
+                  <select 
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                    value={aiConfig.ai_provider}
+                    onChange={e => setAiConfig({...aiConfig, ai_provider: e.target.value})}
+                  >
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="mock">Mock</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Model</label>
+                  <input 
+                    type="text"
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                    value={aiConfig.ai_model}
+                    onChange={e => setAiConfig({...aiConfig, ai_model: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Execution Target</label>
+                  <select 
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                    value={aiConfig.ai_execution_target}
+                    onChange={e => setAiConfig({...aiConfig, ai_execution_target: e.target.value})}
+                  >
+                    <option value="hosted">Hosted (Cloud)</option>
+                    <option value="local_runtime">Local Runtime (Your Machine)</option>
+                    <option value="team_runtime">Team Runtime</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Temperature ({aiConfig.ai_temperature})</label>
+                  <input 
+                    type="range" min="0" max="2" step="0.1"
+                    className="w-full"
+                    value={aiConfig.ai_temperature}
+                    onChange={e => setAiConfig({...aiConfig, ai_temperature: parseFloat(e.target.value)})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">System Instructions</label>
+                  <textarea 
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 h-24 text-sm"
+                    placeholder="Optional instructions for the AI"
+                    value={aiConfig.ai_system_instructions}
+                    onChange={e => setAiConfig({...aiConfig, ai_system_instructions: e.target.value})}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setShowConfig(false)} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300">Cancel</button>
+                  <button onClick={handleSaveConfig} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Config</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 && <p className="text-center text-gray-500 my-8">No messages yet.</p>}
@@ -327,38 +459,57 @@ export default function ConversationView() {
         
         <div className="flex-1 overflow-y-auto mb-4 space-y-2">
           {participants.map(p => (
-            <div key={p.id} className="flex items-center justify-between text-sm p-2 bg-gray-100 dark:bg-gray-700 rounded">
-              <span>{p.user?.username || p.user_id}</span>
-              {activeUsers[p.user_id] ? (
-                <span className="w-2 h-2 rounded-full bg-green-500" title="Online"></span>
-              ) : (
-                <span className="w-2 h-2 rounded-full bg-gray-400" title="Offline"></span>
-              )}
+            <div key={p.id} className="flex flex-col text-sm p-2 bg-gray-100 dark:bg-gray-700 rounded gap-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium truncate">{p.user?.username || p.user_id}</span>
+                {activeUsers[p.user_id] ? (
+                  <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Online"></span>
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-gray-400 shrink-0" title="Offline"></span>
+                )}
+              </div>
+              <button 
+                onClick={() => handleRemoveParticipant(p.user_id)}
+                className="text-xs text-red-600 hover:text-red-800 self-start text-left"
+              >
+                Remove
+              </button>
             </div>
           ))}
         </div>
 
-        <div className="pt-4 border-t dark:border-gray-700">
-          <h4 className="font-semibold text-sm mb-2">Add Member</h4>
-          <form onSubmit={handleAddParticipant} className="flex flex-col gap-2">
-            <select 
-              className="px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-            >
-              <option value="">Select...</option>
-              {availableMembers.map(m => (
-                <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
-              ))}
-            </select>
-            <button 
-              type="submit" 
-              disabled={!selectedUser}
-              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
-            >
-              Add to Chat
-            </button>
-          </form>
+        <div className="pt-4 border-t dark:border-gray-700 space-y-4">
+          <div>
+            <h4 className="font-semibold text-sm mb-2">Add Member</h4>
+            <form onSubmit={handleAddParticipant} className="flex flex-col gap-2">
+              <select 
+                className="px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={selectedUser}
+                onChange={(e) => setSelectedUser(e.target.value)}
+              >
+                <option value="">Select...</option>
+                {availableMembers.map(m => (
+                  <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
+                ))}
+              </select>
+              <button 
+                type="submit" 
+                disabled={!selectedUser}
+                className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
+              >
+                Add to Chat
+              </button>
+            </form>
+          </div>
+          
+          <div className="pt-4 border-t dark:border-gray-700">
+             <button 
+                onClick={handleDeleteConversation}
+                className="w-full px-3 py-2 bg-red-50 text-red-600 border border-red-200 text-sm font-semibold rounded hover:bg-red-100 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400"
+             >
+                Delete Conversation
+             </button>
+          </div>
         </div>
       </div>
     </div>
