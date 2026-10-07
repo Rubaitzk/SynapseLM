@@ -45,14 +45,14 @@ async def websocket_endpoint(
         return
 
     connection_id = str(uuid.uuid4())
-    await manager.connect(websocket, conversation_id, user.id, user.name, connection_id)
+    await manager.connect(websocket, conversation_id, user.id, user.username, connection_id)
     
     # Broadcast presence.joined
     await manager.broadcast_to_conversation(conversation_id, {
         "event": "presence.joined",
         "conversation_id": conversation_id,
         "user_id": user.id,
-        "user_name": user.name
+        "user_name": user.username
     })
     
     try:
@@ -66,7 +66,7 @@ async def websocket_endpoint(
                         "event": event,
                         "conversation_id": conversation_id,
                         "user_id": user.id,
-                        "user_name": user.name
+                        "user_name": user.username
                     })
             except json.JSONDecodeError:
                 pass
@@ -86,14 +86,14 @@ async def websocket_endpoint(
                 "event": "presence.left",
                 "conversation_id": conversation_id,
                 "user_id": user.id,
-                "user_name": user.name
+                "user_name": user.username
             })
             # Clean up stale typing state
             await manager.broadcast_to_conversation(conversation_id, {
                 "event": "typing.stopped",
                 "conversation_id": conversation_id,
                 "user_id": user.id,
-                "user_name": user.name
+                "user_name": user.username
             })
 
 
