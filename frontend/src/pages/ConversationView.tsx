@@ -740,13 +740,15 @@ export default function ConversationView() {
                 <Cpu size={16} className="mr-2" />
                 AI: {conversation.ai_provider}
               </Button>
-              <button 
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-                title="Toggle sidebar"
-              >
-                <PanelRight size={20} />
-              </button>
+              {conversation.team_id && (
+                <button 
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Toggle sidebar"
+                >
+                  <PanelRight size={20} />
+                </button>
+              )}
             </div>
 
           </div>
@@ -899,7 +901,7 @@ export default function ConversationView() {
 
         {/* Right Sidebar - Participants */}
 
-        {sidebarOpen && (
+        {sidebarOpen && conversation.team_id && (
         <div className="hidden lg:flex w-72 flex-col bg-white border-l border-gray-200 shrink-0">
 
           <div className="p-4 border-b border-gray-200">
