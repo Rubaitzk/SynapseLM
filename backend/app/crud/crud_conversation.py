@@ -41,6 +41,11 @@ def get_team_conversations(db: Session, team_id: str, user_id: str) -> List[Conv
         ConversationParticipant.user_id == user_id
     ).all()
 
+def get_user_conversations(db: Session, user_id: str, limit: int = 10) -> List[Conversation]:
+    return db.query(Conversation).join(ConversationParticipant).filter(
+        ConversationParticipant.user_id == user_id
+    ).order_by(Conversation.updated_at.desc()).limit(limit).all()
+
 def delete_conversation(db: Session, conversation_id: str):
     conv = get_conversation(db, conversation_id)
     if conv:

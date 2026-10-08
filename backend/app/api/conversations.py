@@ -39,6 +39,14 @@ def create_conversation(
     
     return crud_conversation.create_conversation(db, conv_in=conv_in, creator_id=current_user.id)
 
+
+@router.get("/", response_model=List[ConversationResponse])
+def get_user_conversations(
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    return crud_conversation.get_user_conversations(db, current_user.id)
+
 @router.get("/{conversation_id}", response_model=ConversationResponse)
 def get_conversation(
     conversation_id: str,

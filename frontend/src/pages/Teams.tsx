@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
+import { AppLayout } from '../components/layout/AppLayout';
+import { Input } from '../components/ui/Input';
+import { Button } from '../components/ui/Button';
+import { Card, CardHeader, CardBody } from '../components/ui/Card';
+import { Users, AlertCircle } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 interface Team {
   id: string;
@@ -11,6 +17,8 @@ export default function Teams() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [newTeamName, setNewTeamName] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { addToast } = useToast();
 
   const fetchTeams = async () => {
     try {
@@ -28,48 +36,89 @@ export default function Teams() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
     try {
       await api.post('/teams/', { name: newTeamName });
       setNewTeamName('');
       fetchTeams();
+      addToast('Team created successfully', 'success');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create team');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-6">Your Teams</h2>
-      
-      <form onSubmit={handleCreate} className="mb-8 flex gap-4">
-        <input
-          type="text"
-          placeholder="New Team Name"
-          required
-          className="flex-1 px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-          value={newTeamName}
-          onChange={(e) => setNewTeamName(e.target.value)}
-        />
-        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-          Create Team
-        </button>
-      </form>
-      
-      {error && <div className="p-3 mb-4 text-sm text-red-500 bg-red-100 rounded">{error}</div>}
+    <AppLayout>
+      <div className="flex-1 overflow-y-auto p-6 md:p-8">
+        <div className="max-w-5xl mx-auto space-y-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Your Teams</h1>
+              <p className="text-gray-500 mt-1">Manage your workspaces and collaborators.</p>
+            </div>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {teams.map(team => (
-          <Link 
-            key={team.id} 
-            to={`/teams/${team.id}`}
-            className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-md transition-shadow border dark:border-gray-700 block"
-          >
-            <h3 className="text-xl font-semibold">{team.name}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Click to view details</p>
-          </Link>
-        ))}
-        {teams.length === 0 && <p className="text-gray-500">You don't belong to any teams yet.</p>}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1 space-y-6">
+              <Card>
+                <CardHeader>
+                  <h2 className="text-lg font-semibold text-gray-900">Create a team</h2>
+                </CardHeader>
+                <CardBody>
+                  <form onSubmit={handleCreate} className="space-y-4">
+                    {error && (
+                      <div className="flex items-center p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded">
+                        <AlertCircle size={16} className="mr-2 flex-shrink-0" />
+                        <span>{error}</span>
+                      </div>
+                    )}
+                    <Input
+                      label="Team Name"
+                      type="text"
+                      placeholder="e.g. Engineering"
+                      required
+                      value={newTeamName}
+                      onChange={(e) => setNewTeamName(e.target.value)}
+                    />
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? 'Creating...' : 'Create Team'}
+                    </Button>
+                  </form>
+                </CardBody>
+              </Card>
+            </div>
+
+            <div className="md:col-span-2">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {teams.map(team => (
+                  <Card key={team.id} className="hover:shadow-md transition-shadow">
+                    <Link to={`/teams/${team.id}`} className="block h-full">
+                      <CardBody className="flex items-start">
+                        <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 mr-4 flex-shrink-0">
+                          <Users size={20} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">{team.name}</h3>
+                          <p className="text-sm text-blue-600 mt-1">View team →</p>
+                        </div>
+                      </CardBody>
+                    </Link>
+                  </Card>
+                ))}
+                
+                {teams.length === 0 && (
+                  <div className="sm:col-span-2 text-center py-12 bg-white border border-dashed border-gray-300 rounded-lg">
+                    <Users size={32} className="mx-auto text-gray-400 mb-3" />
+                    <p className="text-gray-500 mb-4">You aren't part of any teams yet.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </AppLayout>
   );
 }
