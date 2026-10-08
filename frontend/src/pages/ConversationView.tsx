@@ -109,9 +109,12 @@ export default function ConversationView() {
 
       
 
-      const membersRes = await api.get(`/teams/${res.data.team_id}/members`);
-
-      setTeamMembers(membersRes.data);
+      if (res.data.team_id) {
+        const membersRes = await api.get(`/teams/${res.data.team_id}/members`);
+        setTeamMembers(membersRes.data);
+      } else {
+        setTeamMembers([]);
+      }
 
     } catch (err: any) {
 
