@@ -32,10 +32,11 @@ def create_conversation(
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
-    # Verify user is in the team
-    membership = crud_team.get_team_membership(db, team_id=conv_in.team_id, user_id=current_user.id)
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not authorized to create conversations in this team")
+    if conv_in.team_id:
+        # Verify user is in the team
+        membership = crud_team.get_team_membership(db, team_id=conv_in.team_id, user_id=current_user.id)
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not authorized to create conversations in this team")
     
     return crud_conversation.create_conversation(db, conv_in=conv_in, creator_id=current_user.id)
 
@@ -64,11 +65,15 @@ def update_conversation(
 ):
     conv = check_conversation_access(db, conversation_id, current_user.id)
     
-    # Check if user is owner/admin of the team to modify AI config
-    from app.models.team import Role
-    membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
-    if not membership or membership.role not in [Role.owner, Role.admin]:
-        raise HTTPException(status_code=403, detail="Not authorized to modify conversation settings")
+    # Check if user is owner/admin of the team to modify AI config, or owner of individual chat
+    if conv.team_id:
+        from app.models.team import Role
+        membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+        if not membership or membership.role not in [Role.owner, Role.admin]:
+            raise HTTPException(status_code=403, detail="Not authorized to modify conversation settings")
+    else:
+        if conv.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to modify conversation settings")
         
     conv = crud_conversation.update_conversation(db, conv, conv_in)
     return conv
@@ -83,10 +88,14 @@ async def delete_conversation(
     conv = check_conversation_access(db, conversation_id, current_user.id)
     
     # Restrict to owner/admin
-    from app.models.team import Role
-    membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
-    if not membership or membership.role not in [Role.owner, Role.admin]:
-        raise HTTPException(status_code=403, detail="Not authorized to delete conversation")
+    if conv.team_id:
+        from app.models.team import Role
+        membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
+        if not membership or membership.role not in [Role.owner, Role.admin]:
+            raise HTTPException(status_code=403, detail="Not authorized to delete conversation")
+    else:
+        if conv.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete conversation")
         
     crud_conversation.delete_conversation(db, conversation_id)
     
@@ -117,6 +126,9 @@ def add_participant(
 ):
     conv = check_conversation_access(db, conversation_id, current_user.id)
     
+    if not conv.team_id:
+        raise HTTPException(status_code=400, detail="Cannot add participants directly to an individual conversation in Phase 1.5.")
+
     # Verify that the current user is an admin or owner of the team
     from app.models.team import Role
     current_membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
@@ -145,6 +157,8 @@ async def remove_participant(
     
     # If a user is not removing themselves, they must be an admin/owner
     if current_user.id != user_id:
+        if not conv.team_id:
+            raise HTTPException(status_code=403, detail="Cannot remove other participants from an individual conversation.")
         from app.models.team import Role
         current_membership = crud_team.get_team_membership(db, team_id=conv.team_id, user_id=current_user.id)
         if not current_membership or current_membership.role not in [Role.owner, Role.admin]:

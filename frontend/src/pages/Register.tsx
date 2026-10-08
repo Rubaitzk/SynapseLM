@@ -37,12 +37,6 @@ export default function Register() {
       
       login(response.data.access_token);
 
-      // Create a default personal team for the user automatically
-      // We need the token set in api interceptor, which might happen after state update,
-      // but login() sets it in localStorage. We can pass it manually for this one call:
-      await api.post('/teams/', { name: 'Personal Team' }, {
-        headers: { Authorization: `Bearer ${response.data.access_token}` }
-      });
 
       navigate('/');
     } catch (err: any) {

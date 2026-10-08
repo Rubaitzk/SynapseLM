@@ -732,6 +732,7 @@ export default function ConversationView() {
             
 
             <div className="flex items-center gap-2">
+              {/* V2 Extension Point: Action Menu (Share, Rename, Add to Team, Archive) */}
               <Button variant="secondary" size="sm" onClick={() => setShowConfig(true)}>
                 <Cpu size={16} className="mr-2" />
                 AI: {conversation.ai_provider}
@@ -966,41 +967,26 @@ export default function ConversationView() {
 
           <div className="p-4 border-t border-gray-200 space-y-6">
 
-            <div>
-
-              <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Member</h4>
-
-              <form onSubmit={handleAddParticipant} className="space-y-2">
-
-                <select 
-
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-
-                  value={selectedUser}
-
-                  onChange={(e) => setSelectedUser(e.target.value)}
-
-                >
-
-                  <option value="">Select a team member...</option>
-
-                  {availableMembers.map(m => (
-
-                    <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
-
-                  ))}
-
-                </select>
-
-                <Button type="submit" variant="secondary" className="w-full text-sm" disabled={!selectedUser}>
-
-                  Add to Chat
-
-                </Button>
-
-              </form>
-
-            </div>
+            {conversation.team_id && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Member</h4>
+                <form onSubmit={handleAddParticipant} className="space-y-2">
+                  <select 
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    value={selectedUser}
+                    onChange={(e) => setSelectedUser(e.target.value)}
+                  >
+                    <option value="">Select a team member...</option>
+                    {availableMembers.map(m => (
+                      <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
+                    ))}
+                  </select>
+                  <Button type="submit" variant="secondary" className="w-full text-sm" disabled={!selectedUser}>
+                    Add to Chat
+                  </Button>
+                </form>
+              </div>
+            )}
 
             
 

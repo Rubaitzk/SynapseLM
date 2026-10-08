@@ -4,7 +4,7 @@ import api from '../lib/api';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../context/ToastContext';
-import { Send, AlertCircle } from 'lucide-react';
+import { Send } from 'lucide-react';
 
 export default function NewConversation() {
   const [content, setContent] = useState('');
@@ -21,9 +21,7 @@ export default function NewConversation() {
         const res = await api.get('/teams/');
         setTeams(res.data);
         if (res.data.length > 0) {
-          // Find personal team or just pick the first one
-          const personalTeam = res.data.find((t: any) => t.name.toLowerCase() === 'personal team');
-          setSelectedTeamId(personalTeam ? personalTeam.id : res.data[0].id);
+          // We no longer auto-select a team, default is empty (Personal Chat)
         }
       } catch (err) {}
     };
@@ -33,23 +31,17 @@ export default function NewConversation() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
-    if (teams.length === 0) {
-      addToast('You must create a team first to start a conversation.', 'error');
-      navigate('/teams');
-      return;
-    }
-    if (!selectedTeamId) {
-      addToast('Please select a team.', 'error');
-      return;
-    }
     
     setIsSubmitting(true);
     try {
       // 1. Create a draft conversation
-      const convRes = await api.post('/conversations/', { 
-        title: content.substring(0, 30) + (content.length > 30 ? '...' : ''), 
-        team_id: selectedTeamId 
-      });
+      const convPayload: any = { 
+        title: content.substring(0, 30) + (content.length > 30 ? '...' : '')
+      };
+      if (selectedTeamId) {
+        convPayload.team_id = selectedTeamId;
+      }
+      const convRes = await api.post('/conversations/', convPayload);
       const convId = convRes.data.id;
       
       // 2. Send the first message
@@ -85,22 +77,20 @@ export default function NewConversation() {
             />
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
               <div className="px-2 flex items-center">
-                {teams.length > 0 ? (
-                  <select 
-                    value={selectedTeamId}
-                    onChange={e => setSelectedTeamId(e.target.value)}
-                    className="text-xs bg-gray-100 border-none rounded py-1 px-2 text-gray-600 focus:ring-0 outline-none cursor-pointer"
-                  >
-                    {teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-xs text-amber-600 flex items-center">
-                    <AlertCircle size={12} className="mr-1" />
-                    No teams available
-                  </span>
-                )}
+                <select 
+                  value={selectedTeamId}
+                  onChange={e => setSelectedTeamId(e.target.value)}
+                  className="text-xs bg-gray-100 border-none rounded py-1 px-2 text-gray-600 focus:ring-0 outline-none cursor-pointer"
+                >
+                  <option value="">Personal Chat</option>
+                  {teams.length > 0 && (
+                    <optgroup label="Teams">
+                      {teams.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
               </div>
               <Button type="submit" size="sm" className="rounded-xl px-4" disabled={!content.trim() || isSubmitting}>
                 {isSubmitting ? 'Starting...' : <Send size={16} />}

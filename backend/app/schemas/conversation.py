@@ -6,7 +6,8 @@ from app.schemas.user import UserResponse
 
 class ConversationBase(BaseModel):
     title: str
-    team_id: str
+    owner_id: Optional[str] = None
+    team_id: Optional[str] = None
 
 class ConversationCreate(ConversationBase):
     ai_provider: Optional[str] = "gemini"

@@ -8,6 +8,7 @@ def create_conversation(db: Session, conv_in: ConversationCreate, creator_id: st
     db_conv = Conversation(
         title=conv_in.title, 
         team_id=conv_in.team_id,
+        owner_id=None if conv_in.team_id else creator_id,
         ai_provider=conv_in.ai_provider,
         ai_model=conv_in.ai_model,
         ai_execution_target=conv_in.ai_execution_target,
