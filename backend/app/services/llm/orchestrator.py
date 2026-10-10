@@ -12,7 +12,7 @@ import uuid
 from app.services.llm.exceptions import ProviderConfigurationError
 
 SUPPORTED_MODELS = {
-    "gemini": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-exp"],
+    "gemini": ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-flash-tts"],
     "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
     "mock": ["mock"]
 }

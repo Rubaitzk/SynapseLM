@@ -42,7 +42,7 @@ def test_create_conversation_missing_credentials(client, monkeypatch):
     res = client.post("/api/conversations/", json={
         "title": "Missing Creds Test",
         "ai_provider": "gemini",
-        "ai_model": "gemini-1.5-flash"
+        "ai_model": "gemini-3.8-flash"
     }, headers=h)
     
     assert res.status_code == 400
@@ -56,13 +56,13 @@ def test_create_conversation_explicit_selection_success(client, monkeypatch):
     res = client.post("/api/conversations/", json={
         "title": "Valid Combo Test",
         "ai_provider": "gemini",
-        "ai_model": "gemini-1.5-flash"
+        "ai_model": "gemini-3.8-flash"
     }, headers=h)
     
     assert res.status_code == 201
     data = res.json()
     assert data["ai_provider"] == "gemini"
-    assert data["ai_model"] == "gemini-1.5-flash"
+    assert data["ai_model"] == "gemini-3.8-flash"
 
 def test_send_message_missing_credentials(client, monkeypatch):
     # First, create with a valid fake key
@@ -71,7 +71,7 @@ def test_send_message_missing_credentials(client, monkeypatch):
     conv_id = client.post("/api/conversations/", json={
         "title": "Valid Combo Test",
         "ai_provider": "gemini",
-        "ai_model": "gemini-1.5-flash"
+        "ai_model": "gemini-3.8-flash"
     }, headers=h).json()["id"]
 
     # Now, simulate the key being wiped or unconfigured before the message is sent
