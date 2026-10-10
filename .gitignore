@@ -7,3 +7,6 @@ venv/
 .venv/
 .vscode/
 .idea/
+
+backend/test.db
+.pytest_cache/

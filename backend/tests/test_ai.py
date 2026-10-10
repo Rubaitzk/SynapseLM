@@ -19,9 +19,13 @@ def test_mock_provider():
     assert "Hello AI" in response
 
 def test_ai_message_flow(client):
+    import uuid
+    uid = uuid.uuid4().hex[:8]
+    email = f"ai_user_{uid}@example.com"
+    username = f"ai_user_{uid}"
     # Setup users and team
-    client.post("/api/auth/register", json={"email": "ai_user@example.com", "username": "ai_user", "password": "password123"})
-    token = client.post("/api/auth/login", data={"username": "ai_user@example.com", "password": "password123"}).json()["access_token"]
+    client.post("/api/auth/register", json={"email": email, "username": username, "password": "password123"})
+    token = client.post("/api/auth/login", data={"username": email, "password": "password123"}).json()["access_token"]
     h = {"Authorization": f"Bearer {token}"}
     
     # Create team and conversation

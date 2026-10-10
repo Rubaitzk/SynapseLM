@@ -11,10 +11,18 @@ from app.core.realtime import manager
 import uuid
 
 def get_provider(conversation: Conversation) -> LLMProvider:
-    if conversation.ai_provider.lower() == "openai" or conversation.ai_provider.lower() == "gemini":
-        # we'll map gemini to the same openai provider for now (as it might be using the openai-compatible api)
+    provider_name = conversation.ai_provider.lower()
+    from app.core.config import settings
+    
+    if provider_name == "gemini":
+        from app.services.llm.gemini_provider import GeminiProvider
+        if not settings.LLM_API_KEY:
+            raise ValueError("Gemini API key is required but not configured.")
+        return GeminiProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
+    elif provider_name == "openai":
         from app.services.llm.openai_provider import OpenAIProvider
-        from app.core.config import settings
+        if not settings.LLM_API_KEY:
+            raise ValueError("OpenAI API key is required but not configured.")
         return OpenAIProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
     else:
         return MockProvider()

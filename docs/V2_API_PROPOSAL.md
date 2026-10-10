@@ -10,8 +10,8 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authentication**: Required (JWT)
 - **Authorization**: Must be the explicit owner of the individual conversation. Must verify the conversation is not a branch.
 - **Request Body**: `{"expires_in_seconds": 86400}` (Optional)
-- **Response**: `ConversationShareResponse` containing `id`, `share_token` (secure random), `is_active`, `expires_at`.
-- **Idempotency**: Generates a new share each time.
+- **Response**: `ConversationShareResponse` containing `id`, `share_token` (plaintext), `is_active`, `expires_at`.
+- **Security Check**: The backend generates a secure 32-byte url-safe string, hashes it (e.g., SHA-256), and stores only the `token_hash`. The plaintext token is returned exactly once in this response payload.
 
 ### 2. List Shares
 `GET /conversations/{conversation_id}/shares`
@@ -19,6 +19,7 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authentication**: Required
 - **Authorization**: Must be conversation owner.
 - **Response**: `List[ConversationShareResponse]`
+- **Security Check**: This endpoint MUST NOT return stored plaintext tokens (which aren't stored anyway).
 
 ### 3. Revoke Share
 `POST /conversations/{conversation_id}/shares/{share_id}/revoke`
@@ -26,7 +27,7 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authentication**: Required
 - **Authorization**: Must be conversation owner.
 - **Response**: `204 No Content`
-- **State Transition**: Sets `is_active = False`.
+- **State Transition**: Sets `is_active = False`. Prevents new branches and requests, but existing branches persist.
 
 ## B. Share Preview / Access by Recipient
 
@@ -34,7 +35,7 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 `GET /shares/{share_token}`
 - **Actor**: Any Authenticated User (Recipient)
 - **Authentication**: Required
-- **Authorization**: Validates `share_token` is active and not expired.
+- **Authorization**: Hashes the provided token and looks up `token_hash`. Validates `is_active` and `expires_at`.
 - **Response**: `SharedConversationPreviewResponse` (`title`, `owner_username`, `expires_at`).
 - **Security Check**: MUST NOT expose conversation messages, AI configuration, or participant details.
 
@@ -47,7 +48,7 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authorization**: Validates `share_token` is active and not expired. Validates recipient is not already a canonical participant.
 - **Request Body**: None
 - **Response**: `ConversationResponse` (The new branch).
-- **Behavior**: Creates a new `Conversation` owned by the recipient. Sets `parent_conversation_id` to the canonical conversation's ID. Sets `snapshot_at = NOW()`. Sets `lifecycle_state = ACTIVE`.
+- **Behavior**: Creates a new `Conversation` owned by the recipient. Sets `parent_conversation_id` to the canonical conversation's ID. Sets `snapshot_sequence_id` to the canonical conversation's max message sequence. Sets `lifecycle_state = ACTIVE`.
 
 ## D. Access Request Creation
 
@@ -55,11 +56,11 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 `POST /shares/{share_token}/requests`
 - **Actor**: Recipient
 - **Authentication**: Required
-- **Authorization**: Validates `share_token` is active and not expired. Validates recipient owns a valid branch linked to this share.
+- **Authorization**: Validates `share_token` is active and not expired. Validates recipient owns a valid `ACTIVE` branch descending from this share.
 - **Request Body**: `{"branch_conversation_id": "uuid"}`
 - **Response**: `AccessRequestResponse` (status="PENDING")
-- **Behavior**: Creates `ConversationAccessRequest`. Broadcasts `request.created` to canonical conversation.
-- **Idempotency**: Reject if a `PENDING` request already exists for this user/share combination.
+- **Behavior**: Creates `ConversationAccessRequest`. Broadcasts `request.created` to canonical conversation after commit.
+- **Concurrency**: DB Partial Unique constraint blocks duplicate `PENDING` requests.
 
 ### 7. Cancel Access Request
 `POST /requests/{request_id}/cancel`
@@ -84,8 +85,7 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authentication**: Required
 - **Authorization**: Must be conversation owner.
 - **Response**: `ConversationParticipantResponse`
-- **State Transition**: Atomic transaction (Request `ACCEPTED`, Branch `ARCHIVED`, canonical `ConversationParticipant` created). Broadcasts `request.accepted`.
-- **Idempotency**: Fails if request is not `PENDING`.
+- **Concurrency/State**: Uses `SELECT ... FOR UPDATE`. Updates Request to `ACCEPTED`, Branch to `ARCHIVED`, canonical `ConversationParticipant` created. Broadcasts `request.accepted` after commit.
 
 ### 10. Reject Request
 `POST /conversations/{conversation_id}/requests/{request_id}/reject`
@@ -93,11 +93,11 @@ This document outlines the proposed REST API endpoints for V2 sharing and collab
 - **Authentication**: Required
 - **Authorization**: Must be conversation owner.
 - **Response**: `204 No Content`
-- **State Transition**: Request `REJECTED`. Branch remains `ACTIVE`. Broadcasts `request.rejected`.
+- **Concurrency/State**: Uses `SELECT ... FOR UPDATE`. Request `REJECTED`. Branch remains `ACTIVE`. Broadcasts `request.rejected` after commit.
 
 ## F. Actual Participant Management
 
 Leverages existing V1.5 APIs. Once accepted, the recipient uses:
 - `GET /conversations/{canonical_id}/messages`
 - `POST /conversations/{canonical_id}/messages`
-These will succeed because the user now possesses a valid `ConversationParticipant` record for the canonical conversation.
+These will succeed because the user now possesses a valid `ConversationParticipant` record.

@@ -1,13 +1,20 @@
 def test_invitation_flow(client):
+    import uuid
+    uid = uuid.uuid4().hex[:8]
+    owner_email = f"owner_{uid}@example.com"
+    invitee_email = f"invitee_{uid}@example.com"
+    owner_username = f"owner_{uid}"
+    invitee_username = f"invitee_{uid}"
+    
     # Setup owner
-    client.post("/api/auth/register", json={"email": "owner@example.com", "username": "owner", "password": "password123"})
-    res = client.post("/api/auth/login", data={"username": "owner@example.com", "password": "password123"})
+    client.post("/api/auth/register", json={"email": owner_email, "username": owner_username, "password": "password123"})
+    res = client.post("/api/auth/login", data={"username": owner_email, "password": "password123"})
     owner_token = res.json()["access_token"]
     owner_headers = {"Authorization": f"Bearer {owner_token}"}
 
     # Setup invitee
-    client.post("/api/auth/register", json={"email": "invitee@example.com", "username": "invitee", "password": "password123"})
-    res = client.post("/api/auth/login", data={"username": "invitee@example.com", "password": "password123"})
+    client.post("/api/auth/register", json={"email": invitee_email, "username": invitee_username, "password": "password123"})
+    res = client.post("/api/auth/login", data={"username": invitee_email, "password": "password123"})
     invitee_token = res.json()["access_token"]
     invitee_headers = {"Authorization": f"Bearer {invitee_token}"}
 
@@ -16,12 +23,12 @@ def test_invitation_flow(client):
     team_id = team_res.json()["id"]
 
     # Owner invites invitee
-    invite_res = client.post(f"/api/teams/{team_id}/invitations", json={"invitee_email": "invitee@example.com", "role": "member"}, headers=owner_headers)
+    invite_res = client.post(f"/api/teams/{team_id}/invitations", json={"invitee_email": invitee_email, "role": "member"}, headers=owner_headers)
     assert invite_res.status_code == 200
     invitation_id = invite_res.json()["id"]
 
     # Prevent duplicate invitations
-    dup_res = client.post(f"/api/teams/{team_id}/invitations", json={"invitee_email": "invitee@example.com", "role": "member"}, headers=owner_headers)
+    dup_res = client.post(f"/api/teams/{team_id}/invitations", json={"invitee_email": invitee_email, "role": "member"}, headers=owner_headers)
     assert dup_res.status_code == 400
 
     # Invitee lists pending invitations

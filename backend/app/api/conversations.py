@@ -188,7 +188,11 @@ async def send_message(
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
-    check_conversation_access(db, conversation_id, current_user.id)
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    
+    from app.models.conversation import LifecycleState
+    if conv.lifecycle_state != LifecycleState.active:
+        raise HTTPException(status_code=400, detail="Cannot send messages to an archived or deleted conversation")
     
     # 1. Persist user message
     user_msg = crud_conversation.create_message(db, conversation_id, message_in, sender_id=current_user.id)
@@ -245,3 +249,123 @@ async def get_conversation_presence(
             active_users.append(manager.user_info[uid])
             
     return {"active_users": active_users}
+
+# Shares Management
+
+from app.schemas.share import ShareCreate, ConversationShareResponse
+from app.crud import crud_share
+
+@router.post("/{conversation_id}/shares", response_model=ConversationShareResponse)
+def create_share(
+    conversation_id: str,
+    share_in: ShareCreate,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can create shares")
+    if conv.parent_conversation_id:
+        raise HTTPException(status_code=400, detail="Cannot create a share for a branch")
+        
+    share, token = crud_share.create_share(db, conversation_id, current_user.id, share_in.expires_in_seconds)
+    # the token is returned once
+    resp = ConversationShareResponse.model_validate(share)
+    resp.share_token = token
+    return resp
+
+@router.get("/{conversation_id}/shares", response_model=List[ConversationShareResponse])
+def get_shares(
+    conversation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can view shares")
+        
+    shares = crud_share.get_conversation_shares(db, conversation_id)
+    return shares
+
+@router.post("/{conversation_id}/shares/{share_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_share(
+    conversation_id: str,
+    share_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can revoke shares")
+        
+    share = crud_share.get_share(db, share_id)
+    if not share or share.conversation_id != conversation_id:
+        raise HTTPException(status_code=404, detail="Share not found")
+        
+    crud_share.revoke_share(db, share)
+    return None
+
+# Access Requests Management
+
+from app.schemas.request import AccessRequestResponse
+from app.crud import crud_request
+
+@router.get("/{conversation_id}/requests", response_model=List[AccessRequestResponse])
+def get_requests(
+    conversation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can view requests")
+        
+    requests = crud_request.get_conversation_requests(db, conversation_id)
+    return requests
+
+@router.post("/{conversation_id}/requests/{request_id}/accept", response_model=ConversationParticipantResponse)
+async def accept_request(
+    conversation_id: str,
+    request_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can accept requests")
+        
+    # use for_update to lock the request
+    req = db.query(__import__('app.models.conversation', fromlist=['ConversationAccessRequest']).ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
+    if not req or req.share.conversation_id != conversation_id:
+        raise HTTPException(status_code=404, detail="Request not found")
+        
+    try:
+        req = crud_request.accept_request(db, req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    participant = crud_conversation.get_participant(db, conversation_id, req.requester_id)
+    return participant
+
+@router.post("/{conversation_id}/requests/{request_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+async def reject_request(
+    conversation_id: str,
+    request_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    if conv.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the owner can reject requests")
+        
+    req = db.query(__import__('app.models.conversation', fromlist=['ConversationAccessRequest']).ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
+    if not req or req.share.conversation_id != conversation_id:
+        raise HTTPException(status_code=404, detail="Request not found")
+        
+    try:
+        crud_request.reject_request(db, req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    return None
+

@@ -1,12 +1,19 @@
 import pytest
 
 def test_conversation_flow(client):
-    # Setup users
-    client.post("/api/auth/register", json={"email": "u1@example.com", "username": "u1", "password": "password123"})
-    client.post("/api/auth/register", json={"email": "u2@example.com", "username": "u2", "password": "password123"})
+    import uuid
+    uid = uuid.uuid4().hex[:8]
+    u1_email = f"u1_{uid}@example.com"
+    u2_email = f"u2_{uid}@example.com"
+    u1_username = f"u1_{uid}"
+    u2_username = f"u2_{uid}"
     
-    token1 = client.post("/api/auth/login", data={"username": "u1@example.com", "password": "password123"}).json()["access_token"]
-    token2 = client.post("/api/auth/login", data={"username": "u2@example.com", "password": "password123"}).json()["access_token"]
+    # Setup users
+    client.post("/api/auth/register", json={"email": u1_email, "username": u1_username, "password": "password123"})
+    client.post("/api/auth/register", json={"email": u2_email, "username": u2_username, "password": "password123"})
+    
+    token1 = client.post("/api/auth/login", data={"username": u1_email, "password": "password123"}).json()["access_token"]
+    token2 = client.post("/api/auth/login", data={"username": u2_email, "password": "password123"}).json()["access_token"]
     
     h1 = {"Authorization": f"Bearer {token1}"}
     h2 = {"Authorization": f"Bearer {token2}"}
@@ -43,12 +50,19 @@ def test_conversation_flow(client):
     assert data["items"][1]["sender_type"] == "assistant"
 
 def test_participant_management(client):
-    # Setup users
-    client.post("/api/auth/register", json={"email": "u3@example.com", "username": "u3", "password": "password123"})
-    client.post("/api/auth/register", json={"email": "u4@example.com", "username": "u4", "password": "password123"})
+    import uuid
+    uid = uuid.uuid4().hex[:8]
+    u3_email = f"u3_{uid}@example.com"
+    u4_email = f"u4_{uid}@example.com"
+    u3_username = f"u3_{uid}"
+    u4_username = f"u4_{uid}"
     
-    token3 = client.post("/api/auth/login", data={"username": "u3@example.com", "password": "password123"}).json()["access_token"]
-    token4 = client.post("/api/auth/login", data={"username": "u4@example.com", "password": "password123"}).json()["access_token"]
+    # Setup users
+    client.post("/api/auth/register", json={"email": u3_email, "username": u3_username, "password": "password123"})
+    client.post("/api/auth/register", json={"email": u4_email, "username": u4_username, "password": "password123"})
+    
+    token3 = client.post("/api/auth/login", data={"username": u3_email, "password": "password123"}).json()["access_token"]
+    token4 = client.post("/api/auth/login", data={"username": u4_email, "password": "password123"}).json()["access_token"]
     
     h3 = {"Authorization": f"Bearer {token3}"}
     h4 = {"Authorization": f"Bearer {token4}"}

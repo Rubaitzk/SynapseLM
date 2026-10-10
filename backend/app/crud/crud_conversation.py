@@ -5,12 +5,13 @@ from app.models.conversation import Conversation, ConversationParticipant, Messa
 from app.schemas.conversation import ConversationCreate, MessageCreate
 
 def create_conversation(db: Session, conv_in: ConversationCreate, creator_id: str) -> Conversation:
+    from app.core.config import settings
     db_conv = Conversation(
         title=conv_in.title, 
         team_id=conv_in.team_id,
         owner_id=None if conv_in.team_id else creator_id,
-        ai_provider=conv_in.ai_provider,
-        ai_model=conv_in.ai_model,
+        ai_provider=conv_in.ai_provider or settings.LLM_PROVIDER,
+        ai_model=conv_in.ai_model or settings.LLM_MODEL,
         ai_execution_target=conv_in.ai_execution_target,
         ai_system_instructions=conv_in.ai_system_instructions,
         ai_temperature=conv_in.ai_temperature
@@ -23,8 +24,11 @@ def create_conversation(db: Session, conv_in: ConversationCreate, creator_id: st
     add_participant(db, conversation_id=db_conv.id, user_id=creator_id)
     return db_conv
 
-def get_conversation(db: Session, conversation_id: str) -> Optional[Conversation]:
-    return db.query(Conversation).filter(Conversation.id == conversation_id).first()
+def get_conversation(db: Session, conversation_id: str, for_update: bool = False) -> Optional[Conversation]:
+    query = db.query(Conversation).filter(Conversation.id == conversation_id)
+    if for_update:
+        query = query.with_for_update()
+    return query.first()
 
 def update_conversation(db: Session, db_conv: Conversation, conv_in) -> Conversation:
     update_data = conv_in.model_dump(exclude_unset=True)
@@ -78,6 +82,11 @@ def remove_participant(db: Session, conversation_id: str, user_id: str):
 
 # Messages
 def create_message(db: Session, conversation_id: str, message_in: MessageCreate, sender_id: str, sender_type: SenderType = SenderType.user) -> Message:
+    # 1. Lock the conversation to serialize message inserts and guarantee sequence_id monotonicity per conversation
+    conv = get_conversation(db, conversation_id, for_update=True)
+    if not conv:
+        raise ValueError(f"Conversation {conversation_id} not found")
+
     db_msg = Message(
         conversation_id=conversation_id,
         sender_id=sender_id,
@@ -86,19 +95,63 @@ def create_message(db: Session, conversation_id: str, message_in: MessageCreate,
     )
     db.add(db_msg)
     
-    # Update conversation updated_at
-    conv = get_conversation(db, conversation_id)
-    if conv:
-        from datetime import datetime, timezone
-        conv.updated_at = datetime.now(timezone.utc)
+    from datetime import datetime, timezone
+    conv.updated_at = datetime.now(timezone.utc)
         
     db.commit()
     db.refresh(db_msg)
     return db_msg
 
 def get_messages(db: Session, conversation_id: str, skip: int = 0, limit: int = 50) -> Tuple[List[Message], int]:
-    query = db.query(Message).filter(Message.conversation_id == conversation_id)
+    conv = get_conversation(db, conversation_id)
+    if not conv:
+        return [], 0
+    
+    from sqlalchemy import or_, and_
+    if conv.parent_conversation_id:
+        query = db.query(Message).filter(
+            or_(
+                Message.conversation_id == conversation_id,
+                and_(
+                    Message.conversation_id == conv.parent_conversation_id,
+                    Message.sequence_id <= conv.snapshot_sequence_id
+                )
+            )
+        )
+    else:
+        query = db.query(Message).filter(Message.conversation_id == conversation_id)
+        
     total = query.count()
-    # ordering is configured in the relationship and model, but we explicit order here
-    messages = query.order_by(Message.created_at.asc()).offset(skip).limit(limit).all()
+    # sequence_id absolute truth ordering
+    messages = query.order_by(Message.sequence_id.asc()).offset(skip).limit(limit).all()
     return messages, total
+
+def create_branch(db: Session, parent_id: str, owner_id: str, title: str) -> Conversation:
+    # Lock parent to ensure the snapshot_sequence_id is perfectly stable
+    parent = get_conversation(db, parent_id, for_update=True)
+    if not parent:
+        raise ValueError("Parent conversation not found")
+        
+    if parent.parent_conversation_id is not None:
+        raise ValueError("A branch cannot be the parent of another branch (single-level branching invariant violated)")
+
+    max_seq = db.query(func.max(Message.sequence_id)).filter(Message.conversation_id == parent_id).scalar()
+
+    db_branch = Conversation(
+        title=title,
+        owner_id=owner_id,
+        parent_conversation_id=parent.id,
+        snapshot_sequence_id=max_seq,
+        ai_provider=parent.ai_provider,
+        ai_model=parent.ai_model,
+        ai_execution_target=parent.ai_execution_target,
+        ai_system_instructions=parent.ai_system_instructions,
+        ai_temperature=parent.ai_temperature
+    )
+    db.add(db_branch)
+    db.commit()
+    db.refresh(db_branch)
+    
+    # Automatically add owner as participant
+    add_participant(db, conversation_id=db_branch.id, user_id=owner_id)
+    return db_branch

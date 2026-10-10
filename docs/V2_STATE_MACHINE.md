@@ -1,10 +1,10 @@
 # V2 Sharing and Collaboration State Machine
 
-This document defines the strict lifecycle transitions for Shares, Access Requests, and Branches in SynapseLM V2.
+This document defines the strict lifecycle transitions for Shares, Access Requests, and Branches in SynapseLM V2, including transactional guarantees.
 
 ## 1. Conversation Share State Machine
 
-The share token dictates the validity of new access attempts.
+The share token dictates the validity of new access attempts (branches and requests). Existing branches are unaffected by revocation.
 
 ```mermaid
 stateDiagram-v2
@@ -51,7 +51,7 @@ stateDiagram-v2
 
 ## 4. Atomic Cross-Entity Acceptance Transition
 
-When an owner accepts a pending access request, a critical cross-entity transition occurs. This **MUST** be executed as an atomic database transaction to prevent corrupted state.
+When an owner accepts a pending access request, a critical cross-entity transition occurs. This **MUST** be executed as an atomic database transaction using row-level locks (`SELECT ... FOR UPDATE`) to prevent concurrent modification races.
 
 ```mermaid
 sequenceDiagram
@@ -63,11 +63,14 @@ sequenceDiagram
 
     Owner->>DB: Accept Request
     activate DB
+    DB->>Req: SELECT FOR UPDATE
     DB->>Req: Update status = ACCEPTED
+    DB->>Branch: SELECT FOR UPDATE
     DB->>Branch: Update lifecycle_state = ARCHIVED
     DB->>Canonical: Create ConversationParticipant(recipient)
     DB-->>Owner: Transaction Commit
     deactivate DB
+    Owner->>Realtime: Broadcast 'request.accepted'
 ```
 
 ### Transition Table (Acceptance)
@@ -78,7 +81,8 @@ sequenceDiagram
 | **Branch** | `ACTIVE` | `ARCHIVED` | Recipient can no longer send messages to the branch. |
 | **Canonical Conv** | Recipient is unauthorized | Recipient is `Participant` | Recipient can now read live canonical messages and write directly to the canonical conversation. |
 
-### Edge Case Constraints
-- A request can only transition to `PENDING` if the associated `ConversationShare` is `ACTIVE`.
-- If a `ConversationShare` becomes `REVOKED`, existing `PENDING` requests may remain pending or be auto-rejected depending on product policy, but new requests are blocked.
-- A `Branch` remains `ACTIVE` if a request is `REJECTED` or `CANCELLED`, allowing the user to continue isolated interaction.
+### Concurrency and Transaction Boundaries
+- **Accept vs Reject Races**: The API uses `SELECT ... FOR UPDATE` on the `ConversationAccessRequest` row, verifying `status == PENDING` before applying any state change.
+- **Duplicate Pending Requests**: A partial unique index on the database (`share_id`, `requester_id`) where `status = 'PENDING'` ensures a user cannot spam multiple active requests.
+- **Branch Archival vs Message Write**: Message creation endpoints lock the `Conversation` row (`SELECT ... FOR UPDATE`) and verify `lifecycle_state == ACTIVE`. If an accept transaction archives the branch simultaneously, the message write will safely abort.
+- **Realtime Publishing**: Redis broadcasts (`request.accepted`, `message.created`) MUST only be dispatched *after* the database transaction commits successfully, ensuring clients do not fetch stale state.

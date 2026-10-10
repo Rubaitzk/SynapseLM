@@ -18,12 +18,15 @@ V2 strictly enforces a single level of branching.
 - **Invalid:** `Canonical -> Branch A -> Branch B`
 The backend enforces this by rejecting any attempt to create a share or a branch from a conversation that already has a `parent_conversation_id` set.
 
-### 2. Snapshot Boundary
+### 2. Deterministic Snapshot Boundary
 A branch inherits the canonical conversation's history exactly as it existed at the moment the branch was created.
-- The snapshot boundary is deterministic, represented by a `snapshot_at` timestamp on the branch.
-- **No Live Sync:** Messages added to the canonical conversation *after* `snapshot_at` do not appear in the branch.
-- **No Reverse Sync:** Messages added to the branch never silently appear in the canonical conversation.
-- The AI Context Builder constructs the branch's context by querying canonical messages where `created_at <= branch.snapshot_at`, and appending branch-local messages.
+To guarantee deterministic context assembly under concurrent message writes, relying on `created_at` timestamps is insufficient due to transaction isolation and clock skew.
+
+**The Solution:**
+- Introduce a monotonically increasing `sequence_id` (Integer, auto-increment) to the `Message` table.
+- A branch records a `snapshot_sequence_id`, which captures the maximum `sequence_id` of the canonical conversation at the time of branching.
+- The AI Context Builder queries canonical messages `WHERE conversation_id = parent.id AND sequence_id <= branch.snapshot_sequence_id`.
+- This ensures perfect pagination, robust message ordering, and immunity to race conditions without duplicating historical message rows.
 
 ### 3. No Auto-Merging
 Branch messages are completely isolated. They are never copied or interleaved into the canonical conversation's history. 
@@ -36,9 +39,9 @@ A branch operates as a state machine with the following states:
 - **ARCHIVED**: The branch becomes immutable. This occurs when an access request is ACCEPTED by the owner.
 
 ### Edge Cases
-- **Share Revoked/Expired**: If the original share link becomes invalid, existing `ACTIVE` branches remain `ACTIVE` for isolated chatting, but the recipient can no longer submit an access request to the canonical conversation.
+- **Share Revoked/Expired**: If the original share link becomes invalid, existing `ACTIVE` branches remain `ACTIVE` for isolated chatting using their established context. However, the recipient can no longer submit an access request to the canonical conversation through that branch.
 - **Request Rejected**: The branch remains `ACTIVE`. The recipient is isolated but can still chat with the AI using the branched context.
-- **Recipient Abandons**: The branch remains `ACTIVE` indefinitely until manual cleanup or archival policies are introduced in V3.
+- **Recipient Abandons**: The branch remains `ACTIVE` indefinitely subject to general data retention policies.
 
 ## 4. Acceptance Transition
 When an access request is **ACCEPTED**:

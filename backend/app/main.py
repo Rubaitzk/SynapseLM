@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, teams, invitations, conversations, websockets
+from app.api import auth, teams, invitations, conversations, websockets, shares, requests
 import asyncio
 from contextlib import asynccontextmanager
 from app.core.realtime import manager
@@ -28,6 +28,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(invitations.router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
+app.include_router(shares.router, prefix="/api/shares", tags=["shares"])
+app.include_router(requests.router, prefix="/api/requests", tags=["requests"])
 app.include_router(websockets.router, tags=["websockets"]) # Websockets shouldn't necessarily have a prefix if it's just /ws
 
 @app.get("/health")

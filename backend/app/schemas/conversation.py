@@ -10,8 +10,8 @@ class ConversationBase(BaseModel):
     team_id: Optional[str] = None
 
 class ConversationCreate(ConversationBase):
-    ai_provider: Optional[str] = "gemini"
-    ai_model: Optional[str] = "gemini-1.5-flash"
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
     ai_execution_target: Optional[ExecutionTarget] = ExecutionTarget.hosted
     ai_system_instructions: Optional[str] = None
     ai_temperature: Optional[float] = 0.7

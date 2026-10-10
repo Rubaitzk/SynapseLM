@@ -1,12 +1,19 @@
+import uuid
+_UID = uuid.uuid4().hex[:8]
+_EMAIL = f"test_{_UID}@example.com"
+_USER = f"testuser_{_UID}"
+_EMAIL2 = f"another_{_UID}@example.com"
+_USER2 = f"anotheruser_{_UID}"
+
 def test_register(client):
     response = client.post(
         "/api/auth/register",
-        json={"email": "test@example.com", "username": "testuser", "password": "password123"},
+        json={"email": _EMAIL, "username": _USER, "password": "password123"},
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["email"] == "test@example.com"
-    assert data["username"] == "testuser"
+    assert data["email"] == _EMAIL
+    assert data["username"] == _USER
     assert "id" in data
     assert "hashed_password" not in data
     assert "password" not in data
@@ -14,7 +21,7 @@ def test_register(client):
 def test_register_duplicate_email(client):
     response = client.post(
         "/api/auth/register",
-        json={"email": "test@example.com", "username": "anotheruser", "password": "password123"},
+        json={"email": _EMAIL, "username": _USER2, "password": "password123"},
     )
     assert response.status_code == 400
     assert "already exists" in response.json()["detail"]
@@ -22,7 +29,7 @@ def test_register_duplicate_email(client):
 def test_register_duplicate_username(client):
     response = client.post(
         "/api/auth/register",
-        json={"email": "another@example.com", "username": "testuser", "password": "password123"},
+        json={"email": _EMAIL2, "username": _USER, "password": "password123"},
     )
     assert response.status_code == 400
     assert "already exists" in response.json()["detail"]
@@ -30,7 +37,7 @@ def test_register_duplicate_username(client):
 def test_login_successful(client):
     response = client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "password123"},
+        data={"username": _EMAIL, "password": "password123"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -40,7 +47,7 @@ def test_login_successful(client):
 def test_login_invalid_password(client):
     response = client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "wrongpassword"},
+        data={"username": _EMAIL, "password": "wrongpassword"},
     )
     assert response.status_code == 400
     assert "Incorrect" in response.json()["detail"]
@@ -56,7 +63,7 @@ def test_authenticated_current_user(client):
     # Get token
     login_res = client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "password123"},
+        data={"username": _EMAIL, "password": "password123"},
     )
     token = login_res.json()["access_token"]
 
@@ -67,7 +74,7 @@ def test_authenticated_current_user(client):
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["email"] == "test@example.com"
+    assert data["email"] == _EMAIL
 
 def test_unauthenticated_request(client):
     response = client.get("/api/auth/me")
