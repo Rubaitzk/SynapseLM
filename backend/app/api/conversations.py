@@ -38,7 +38,13 @@ def create_conversation(
         if not membership:
             raise HTTPException(status_code=403, detail="Not authorized to create conversations in this team")
     
-    return crud_conversation.create_conversation(db, conv_in=conv_in, creator_id=current_user.id)
+    conv = crud_conversation.create_conversation(db, conv_in=conv_in, creator_id=current_user.id)
+    
+    # Validate provider configuration synchronously
+    from app.services.llm.orchestrator import get_provider
+    get_provider(conv)
+    
+    return conv
 
 
 @router.get("/", response_model=List[ConversationResponse])
@@ -118,7 +124,7 @@ def get_participants(
     return crud_conversation.get_participants(db, conversation_id)
 
 @router.post("/{conversation_id}/participants/{user_id}", response_model=ConversationParticipantResponse)
-def add_participant(
+async def add_participant(
     conversation_id: str,
     user_id: str,
     db: Session = Depends(deps.get_db),
@@ -144,7 +150,16 @@ def add_participant(
     if existing:
         raise HTTPException(status_code=400, detail="User is already a participant")
         
-    return crud_conversation.add_participant(db, conversation_id, user_id)
+    participant = crud_conversation.add_participant(db, conversation_id, user_id)
+    
+    # Broadcast to conversation
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "participant.added",
+        "conversation_id": conversation_id,
+        "user_id": user_id
+    })
+    
+    return participant
 
 @router.delete("/{conversation_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_participant(
@@ -207,6 +222,10 @@ async def send_message(
         "message": message_data
     })
     
+    # 1.6 Synchronously validate provider before sending to background
+    from app.services.llm.orchestrator import get_provider
+    get_provider(conv)
+
     # 2. Trigger AI orchestrator in background
     from app.services.llm.orchestrator import generate_assistant_response
     background_tasks.add_task(generate_assistant_response, db, conversation_id)
@@ -345,6 +364,28 @@ async def accept_request(
         raise HTTPException(status_code=400, detail=str(e))
         
     participant = crud_conversation.get_participant(db, conversation_id, req.requester_id)
+    
+    # Broadcast to parent conversation
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "request.accepted",
+        "conversation_id": conversation_id,
+        "request_id": req.id,
+        "requester_id": req.requester_id
+    })
+    # Also broadcast participant.added
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "participant.added",
+        "conversation_id": conversation_id,
+        "user_id": req.requester_id
+    })
+    # Broadcast to branch conversation so requester gets it
+    await manager.broadcast_to_conversation(req.branch_conversation_id, {
+        "event": "request.accepted",
+        "conversation_id": req.branch_conversation_id,
+        "request_id": req.id,
+        "requester_id": req.requester_id
+    })
+    
     return participant
 
 @router.post("/{conversation_id}/requests/{request_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
@@ -366,6 +407,21 @@ async def reject_request(
         crud_request.reject_request(db, req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
+    # Broadcast to parent conversation
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "request.rejected",
+        "conversation_id": conversation_id,
+        "request_id": req.id,
+        "status": "rejected"
+    })
+    # Broadcast to branch conversation
+    await manager.broadcast_to_conversation(req.branch_conversation_id, {
+        "event": "request.rejected",
+        "conversation_id": req.branch_conversation_id,
+        "request_id": req.id,
+        "status": "rejected"
+    })
         
     return None
 

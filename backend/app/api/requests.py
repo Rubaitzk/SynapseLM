@@ -6,8 +6,10 @@ from app.schemas.request import AccessRequestResponse
 
 router = APIRouter()
 
+from app.core.realtime import manager
+
 @router.post("/{request_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
-def cancel_request(request_id: str, db: Session = Depends(deps.get_db), current_user = Depends(deps.get_current_user)):
+async def cancel_request(request_id: str, db: Session = Depends(deps.get_db), current_user = Depends(deps.get_current_user)):
     req = crud_request.get_request(db, request_id)
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
@@ -19,4 +21,13 @@ def cancel_request(request_id: str, db: Session = Depends(deps.get_db), current_
         crud_request.cancel_request(db, req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+        
+    # Broadcast to parent conversation
+    await manager.broadcast_to_conversation(req.share.conversation_id, {
+        "event": "request.cancelled",
+        "conversation_id": req.share.conversation_id,
+        "request_id": req.id,
+        "status": "cancelled"
+    })
+    
     return None

@@ -9,23 +9,56 @@ from app.schemas.conversation import MessageCreate, MessageResponse
 import asyncio
 from app.core.realtime import manager
 import uuid
+from app.services.llm.exceptions import ProviderConfigurationError
+
+SUPPORTED_MODELS = {
+    "gemini": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-exp"],
+    "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+    "mock": ["mock"]
+}
+
+def validate_provider_and_model(provider_name: str, model_name: str):
+    provider_name = provider_name.lower()
+    if provider_name not in SUPPORTED_MODELS:
+        raise ProviderConfigurationError(
+            provider=provider_name,
+            detail=f"Provider '{provider_name}' is not supported.",
+            error_code="unsupported_provider",
+            status_code=400
+        )
+    if model_name not in SUPPORTED_MODELS[provider_name]:
+        raise ProviderConfigurationError(
+            provider=provider_name,
+            detail=f"Model '{model_name}' is not supported for provider '{provider_name}'.",
+            error_code="invalid_provider_model_combo",
+            status_code=400
+        )
 
 def get_provider(conversation: Conversation) -> LLMProvider:
     provider_name = conversation.ai_provider.lower()
     from app.core.config import settings
     
+    validate_provider_and_model(provider_name, conversation.ai_model)
+    
     if provider_name == "gemini":
         from app.services.llm.gemini_provider import GeminiProvider
         if not settings.LLM_API_KEY:
-            raise ValueError("Gemini API key is required but not configured.")
+            raise ProviderConfigurationError("gemini", "Gemini API key is required but not configured.")
         return GeminiProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
     elif provider_name == "openai":
         from app.services.llm.openai_provider import OpenAIProvider
         if not settings.LLM_API_KEY:
-            raise ValueError("OpenAI API key is required but not configured.")
+            raise ProviderConfigurationError("openai", "OpenAI API key is required but not configured.")
         return OpenAIProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
-    else:
+    elif provider_name == "mock":
         return MockProvider()
+    else:
+        raise ProviderConfigurationError(
+            provider=provider_name,
+            detail=f"Provider '{provider_name}' is not supported.",
+            error_code="unsupported_provider",
+            status_code=400
+        )
 
 async def generate_assistant_response(db: Session, conversation_id: str) -> Optional[str]:
     """

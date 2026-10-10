@@ -47,8 +47,10 @@ def create_branch_from_share(share_token: str, db: Session = Depends(deps.get_db
     branch = crud_conversation.create_branch(db, share.conversation_id, current_user.id, f"Branch of {share.conversation.title}")
     return branch
 
+from app.core.realtime import manager
+
 @router.post("/{share_token}/requests", response_model=AccessRequestResponse)
-def request_access(share_token: str, req_in: AccessRequestCreate, db: Session = Depends(deps.get_db), current_user = Depends(deps.get_current_user)):
+async def request_access(share_token: str, req_in: AccessRequestCreate, db: Session = Depends(deps.get_db), current_user = Depends(deps.get_current_user)):
     share = crud_share.get_share_by_token(db, share_token)
     if not share or not share.is_active:
         raise HTTPException(status_code=404, detail="Share link is invalid or revoked")
@@ -65,6 +67,16 @@ def request_access(share_token: str, req_in: AccessRequestCreate, db: Session = 
         
     try:
         req = crud_request.create_request(db, share.id, current_user.id, branch.id)
+        
+        # Broadcast request.created to the parent conversation
+        await manager.broadcast_to_conversation(share.conversation_id, {
+            "event": "request.created",
+            "conversation_id": share.conversation_id,
+            "request_id": req.id,
+            "requester_id": req.requester_id,
+            "branch_id": req.branch_conversation_id
+        })
+        
         return req
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

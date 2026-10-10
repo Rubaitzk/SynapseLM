@@ -16,6 +16,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SynapseLM API", version="1.0.0", lifespan=lifespan)
 
+from fastapi.responses import JSONResponse
+from fastapi import Request
+from app.services.llm.exceptions import ProviderConfigurationError
+
+@app.exception_handler(ProviderConfigurationError)
+async def provider_configuration_exception_handler(request: Request, exc: ProviderConfigurationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error_code": exc.error_code,
+            "provider": exc.provider,
+            "detail": exc.detail
+        },
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"], # Vite default port
