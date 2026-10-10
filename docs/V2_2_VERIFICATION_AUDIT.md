@@ -26,12 +26,13 @@ This report provides an evidence-based audit of the LLM provider architecture co
    - `tests/conftest.py` uses Alembic migrations and binds a `TestingSessionLocal` to `synapselm_test`. The `setup_db` fixture explicitly avoids `drop_all` / `create_all`. 
    - While the `db_session` fixture yields and then calls `session.rollback()`, the API endpoints are tested via `TestClient` utilizing `app.dependency_overrides[get_db] = override_get_db`. The `override_get_db` session commits records directly to the database and *does not roll back* at the end of the test.
 2. **UUID Evaluation**:
-   - Because of the missing test cleanup/teardown logic, records are permanently written to `synapselm_test`.
-   - Generating `uuid4()` for emails and usernames in `test_ai.py`, `test_auth.py`, `test_conversations.py`, `test_invitations.py`, `test_teams.py`, and `test_websockets.py` prevents `IntegrityError` collisions across runs.
-   - **Verdict**: UUIDs are a valid band-aid for idempotency, but they cause infinite data accumulation in the test database.
-   - **Recommendation**: In the future, the test suite should ideally truncate tables before execution or employ savepoint rollbacks for the API test client.
-
-## C. V2.2 API and Domain Constraints Audit
+   - Because of the missing test cleanup/teardown logic, records were permanently written to `synapselm_test`.
+   - Generating `uuid4()` for emails and usernames prevented `IntegrityError` collisions across runs, but caused infinite data accumulation in the test database.
+3. **Database Isolation Strategy Implemented**:
+   - We modified `backend/tests/conftest.py` to add a `clear_db` fixture with `autouse=True, scope="module"`.
+   - This fixture explicitly issues a `DELETE FROM` across all tables (except `alembic_version`) at the start of each test module.
+   - It guarantees safety by aggressively validating the connection string (`if not str(engine.url).endswith("_test"): raise Exception(...)`), ensuring production databases are never accidentally cleared.
+   - We also modified `override_get_db` to properly issue `db.rollback()` in its `finally` block and forced SQLAlchemy to use `NullPool` to prevent background-task dangling connections from holding `ACCESS EXCLUSIVE` table locks during test progression.
 
 1. **Snapshot Consistency**: `snapshot_sequence_id` is successfully established using a table lock during branch creation (`get_conversation(db, parent_id, for_update=True)`). Message retrieval dynamically merges canonical messages (`sequence_id <= snapshot_sequence_id`) with branch-local messages, ensuring deterministic ordering without duplicating rows.
 2. **Share Token Security**: `ConversationShare` generates a token, stores its hash, and returns the plaintext token only once via `POST /api/conversations/{id}/shares`. Previews limit data exposure successfully.
@@ -41,15 +42,15 @@ This report provides an evidence-based audit of the LLM provider architecture co
 
 ## D. Test Reproduction
 
-- **Command Used**: `.\venv\Scripts\pytest tests\` (executed twice consecutively to prove idempotency).
+- **Command Used**: `.\venv\Scripts\pytest tests\; .\venv\Scripts\pytest tests\` (executed twice consecutively to prove idempotency and isolation).
 - **Environment**: `TEST_DATABASE_URL` pointing to PostgreSQL (`synapselm_test`). 
 - **LLM Context**: `LLM_PROVIDER=mock`, entirely offline, no Gemini credentials used.
-- **Results**: Both runs passed completely (26 passed, 0 failed). No live Gemini network requests were executed (live tests skipped/untested with real credentials during this offline verification).
+- **Results**: Both runs passed completely (26 passed, 0 failed each time). No live Gemini network requests were executed (live tests skipped/untested with real credentials during this offline verification). The database is properly cleared before every module, leaving no persistent data accumulation.
 
 ## Verdict
 **Verified with limitations.** 
-The architecture corrections and API logic strictly satisfy the V2.2 requirements, operate concurrently using database locks, and gracefully resolve providers.
+The architecture corrections and API logic strictly satisfy the V2.2 requirements, operate concurrently using database locks, and gracefully resolve providers. We have also resolved the test isolation issue by utilizing `DELETE FROM` fixtures to wipe data cleanly without deadlocking.
+
 **Remaining Blockers / Limitations:**
 1. Live Gemini behavior has not been explicitly run against the network during this offline test cycle.
-2. The test suite is now idempotent but continuously accumulates records in `synapselm_test` due to the lack of teardown truncation. 
-3. Realtime WebSocket broadcast events for requests (`request.created`, `request.accepted`) are unhooked, pending the frontend integration phase.
+2. Realtime WebSocket broadcast events for requests (`request.created`, `request.accepted`) are unhooked, pending the frontend integration phase.
