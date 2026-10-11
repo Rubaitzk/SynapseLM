@@ -46,3 +46,14 @@ The `orchestrator.py` module integrates credential resolution without duplicatin
   - Test that Bob cannot send a message using Alice's credential in a shared chat.
   - Test that attempting to use a revoked credential falls back to the system key or fails.
   - Test that symmetric encryption behaves securely (round-trip correctness, tampered ciphertext rejection, and missing key handling). Do not assert that encrypting the same input twice yields identical ciphertext (Fernet is non-deterministic).
+
+## 9. Key Management & Deferred Rotation Limitation
+- **Master Key Format**: `CREDENTIAL_ENCRYPTION_KEY` must be a 32-byte url-safe base64-encoded string (generated via `Fernet.generate_key().decode()`).
+- **Storage Separation**: Stored exclusively in server environment variables or deployment secrets managers; never checked into version control or written into the database.
+- **Key Loss/Modification**: If `CREDENTIAL_ENCRYPTION_KEY` is lost or changed without migration, existing ciphertexts cannot be decrypted. The backend raises a controlled `decryption_failed` error, requiring users to re-enter their API keys.
+- **Deferred Key Rotation Limitation**: Automated multi-key rotation is deferred to a future maintenance phase. When implemented, key rotation will be performed by:
+  1. Booting with both old and new keys in memory.
+  2. Querying all `user_credentials` rows with `key_version = "v1"`.
+  3. Decrypting each row with the old key and re-encrypting with the new key.
+  4. Updating `key_version` to `"v2"`.
+  5. Retiring the old key from the deployment environment.
