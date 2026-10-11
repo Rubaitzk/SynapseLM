@@ -10,3 +10,13 @@ venv/
 
 backend/test.db
 .pytest_cache/
+
+# Archives and scratch/patch files
+*.zip
+scratch/
+scratch*.py
+backend/scratch*.py
+patch*.py
+backend/patch*.py
+frontend/patch*.py
+fix.py
