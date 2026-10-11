@@ -13,19 +13,29 @@ router = APIRouter()
 
 async def validate_provider_key(provider_name: str, api_key: str):
     if provider_name == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=10.0)
-            if resp.status_code != 200:
-                # Redact provider response details
-                raise HTTPException(status_code=400, detail="Invalid Gemini API key.")
+        url = "https://generativelanguage.googleapis.com/v1beta/models"
+        headers = {"x-goog-api-key": api_key}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, timeout=10.0)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Invalid Gemini API key.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Unable to validate Gemini API key due to network error.")
     elif provider_name == "openai":
         url = "https://api.openai.com/v1/models"
         headers = {"Authorization": f"Bearer {api_key}"}
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=10.0)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=400, detail="Invalid OpenAI API key.")
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url, headers=headers, timeout=10.0)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Invalid OpenAI API key.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Unable to validate OpenAI API key due to network error.")
     elif provider_name == "mock":
         pass
     else:

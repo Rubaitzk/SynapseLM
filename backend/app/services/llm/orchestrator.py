@@ -131,13 +131,17 @@ async def generate_assistant_response(db: Session, conversation_id: str, user_id
             await asyncio.sleep(0.05)
             
     except Exception as e:
-        print(f"Provider error: {e}")
+        err_text = str(e)
+        prov_key = getattr(provider, 'api_key', None)
+        if prov_key and prov_key in err_text:
+            err_text = err_text.replace(prov_key, "[REDACTED]")
+        print(f"Provider error: {err_text}")
         content = "I'm sorry, I encountered an error while trying to process that."
         await manager.broadcast_to_conversation(conversation_id, {
             "event": "assistant.response.failed",
             "conversation_id": conversation_id,
             "message_id": response_id,
-            "error": str(e)
+            "error": err_text
         })
         return None
         

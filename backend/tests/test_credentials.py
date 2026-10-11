@@ -123,11 +123,46 @@ def test_shared_conversation_uses_sender_credential(client, monkeypatch):
     # The synchronous get_provider check should capture Bob's key
     resp = client.post(f"/api/conversations/{conv_id}/messages", headers=h_bob, json={"content": "Hi Alice"})
     assert resp.status_code == 200
-
-    # The background task might also run DummyGeminiProvider, but both should use BOB_KEY
     assert "BOB_KEY" in recorded_keys
     assert "ALICE_KEY" not in recorded_keys
     assert "system-key" not in recorded_keys
+
+    # 7. Alice sends a message to the same conversation -> uses ALICE_KEY
+    recorded_keys.clear()
+    resp_alice = client.post(f"/api/conversations/{conv_id}/messages", headers=h_alice, json={"content": "Welcome Bob"})
+    assert resp_alice.status_code == 200
+    assert "ALICE_KEY" in recorded_keys
+    assert "BOB_KEY" not in recorded_keys
+    assert "system-key" not in recorded_keys
+
+def test_credential_replacement_and_isolation(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "")
+    monkeypatch.setattr("app.api.endpoints.credentials.validate_provider_key", dummy_validate_provider_key)
+    monkeypatch.setattr(settings, 'CREDENTIAL_ENCRYPTION_KEY', mock_key)
+
+    # User 1 registers and adds key1
+    client.post("/api/auth/register", json={"email": "u1@ex.com", "username": "u1", "password": "pw"})
+    t1 = client.post("/api/auth/login", data={"username": "u1@ex.com", "password": "pw"}).json()["access_token"]
+    h1 = {"Authorization": f"Bearer {t1}"}
+    client.post("/api/credentials/", json={"provider_name": "gemini", "api_key": "KEY_V1"}, headers=h1)
+
+    # User 1 replaces key with key2
+    res = client.post("/api/credentials/", json={"provider_name": "gemini", "api_key": "KEY_V2"}, headers=h1)
+    assert res.status_code == 200
+
+    # User 2 registers
+    client.post("/api/auth/register", json={"email": "u2@ex.com", "username": "u2", "password": "pw"})
+    t2 = client.post("/api/auth/login", data={"username": "u2@ex.com", "password": "pw"}).json()["access_token"]
+    h2 = {"Authorization": f"Bearer {t2}"}
+
+    # User 2 attempts to delete gemini credential -> should return 404 because user 2 has no credential
+    del_res = client.delete("/api/credentials/gemini", headers=h2)
+    assert del_res.status_code == 404
+
+    # User 1's credential must remain intact and configured
+    u1_creds = client.get("/api/credentials/", headers=h1).json()
+    u1_gemini = next(c for c in u1_creds if c["provider_name"] == "gemini")
+    assert u1_gemini["is_configured"] is True
 
 def test_decryption_failure_halts_provider_initialization(client, monkeypatch, db_session):
     monkeypatch.setattr(settings, "LLM_API_KEY", "system-key")

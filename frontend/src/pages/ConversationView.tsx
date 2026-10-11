@@ -61,6 +61,7 @@ export default function ConversationView() {
   
 
   const [selectedUser, setSelectedUser] = useState('');
+  const [providerConfigError, setProviderConfigError] = useState<{ message: string; provider?: string } | null>(null);
 
   
 
@@ -515,15 +516,23 @@ export default function ConversationView() {
       });
 
     } catch (err: any) {
-
       const data = err.response?.data;
-      if (data?.error_code === "provider_configuration_missing" || data?.error_code === "unsupported_provider") {
-        addToast(`${data.detail} Please configure your API key in Settings.`, "error");
+      if (data?.error_code === "provider_configuration_missing") {
+        const prov = conversation?.ai_provider || "AI";
+        const msg = `${data.detail || `API key for ${prov} is not configured.`} Please configure your API key in Settings.`;
+        addToast(msg, "error");
+        setProviderConfigError({ message: msg, provider: prov });
+      } else if (data?.error_code === "decryption_failed") {
+        const prov = conversation?.ai_provider || "AI";
+        const msg = `Decryption failed for your personal ${prov} credential. Please update your API key in Settings.`;
+        addToast(msg, "error");
+        setProviderConfigError({ message: msg, provider: prov });
+      } else if (data?.error_code === "unsupported_provider" || data?.error_code === "invalid_provider_model_combo") {
+        addToast(data.detail || "Unsupported provider or model combination.", "error");
       } else {
         addToast(data?.detail || "Failed to send message", "error");
       }
-      setContent(payload); // restore content
-
+      setContent(payload); // restore content so user can retry
     }
 
   };
@@ -886,8 +895,32 @@ export default function ConversationView() {
               <div className="text-xs text-gray-500 italic h-5 mb-1 px-2">
 
                 {typingText}
-
               </div>
+
+              {providerConfigError && (
+                <div className="mb-2 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between text-xs animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 text-amber-900 pr-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>{providerConfigError.message}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button 
+                      size="sm" 
+                      onClick={() => navigate('/settings')}
+                      className="text-xs py-1 px-3"
+                    >
+                      Go to Settings
+                    </Button>
+                    <button 
+                      type="button"
+                      onClick={() => setProviderConfigError(null)} 
+                      className="text-amber-700 hover:text-amber-900 text-xs px-1.5 py-0.5 hover:underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={handleSend} className="flex gap-2">
 

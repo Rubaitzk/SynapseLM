@@ -14,7 +14,8 @@ class GeminiProvider(LLMProvider):
             self.model = model
         
     def generate_response(self, system_instruction: str, messages: List[Dict[str, str]], **kwargs) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/{self.model}:generateContent?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/{self.model}:generateContent"
+        headers = {"x-goog-api-key": self.api_key}
         
         contents = []
         for m in messages:
@@ -46,7 +47,7 @@ class GeminiProvider(LLMProvider):
         }
         
         with httpx.Client() as client:
-            response = client.post(url, json=payload, timeout=60.0)
+            response = client.post(url, headers=headers, json=payload, timeout=60.0)
             if response.status_code != 200:
                 raise RuntimeError(f"Gemini API error: {response.status_code} - {response.text}")
                 
