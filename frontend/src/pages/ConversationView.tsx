@@ -416,7 +416,12 @@ export default function ConversationView() {
 
       
 
-      ws.current.onclose = () => {
+      ws.current.onclose = (event) => {
+        if (event.code === 1008) {
+          isRevokedRef.current = true;
+          setConnectionStatus('disconnected');
+          return;
+        }
         if (isRevokedRef.current) return;
         setConnectionStatus('reconnecting');
         if (reconnectTimer) clearTimeout(reconnectTimer);
