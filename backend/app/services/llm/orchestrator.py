@@ -38,18 +38,33 @@ def get_provider(db: Session, conversation: Conversation, user_id: str) -> LLMPr
     provider_name = conversation.ai_provider.lower()
     from app.core.config import settings
     from app.crud.crud_credential import get_decrypted_credential
+    from app.core.encryption import EncryptionError
     
     validate_provider_and_model(provider_name, conversation.ai_model)
     
     if provider_name == "mock":
         return MockProvider()
         
-    api_key = get_decrypted_credential(db, user_id, provider_name)
+    try:
+        api_key = get_decrypted_credential(db, user_id, provider_name)
+    except EncryptionError as e:
+        raise ProviderConfigurationError(
+            provider=provider_name,
+            detail=f"Decryption failed for your personal credential: {str(e)}",
+            error_code="decryption_failed",
+            status_code=400
+        )
+
     if not api_key:
         api_key = settings.LLM_API_KEY
         
     if not api_key:
-        raise ProviderConfigurationError(provider_name, f"{provider_name.capitalize()} API key is required but not configured.")
+        raise ProviderConfigurationError(
+            provider=provider_name, 
+            detail=f"{provider_name.capitalize()} API key is required but not configured.",
+            error_code="provider_configuration_missing",
+            status_code=400
+        )
         
     if provider_name == "gemini":
         from app.services.llm.gemini_provider import GeminiProvider

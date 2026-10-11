@@ -128,3 +128,39 @@ def test_shared_conversation_uses_sender_credential(client, monkeypatch):
     assert "BOB_KEY" in recorded_keys
     assert "ALICE_KEY" not in recorded_keys
     assert "system-key" not in recorded_keys
+
+def test_decryption_failure_halts_provider_initialization(client, monkeypatch, db_session):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "system-key")
+    monkeypatch.setattr("app.api.endpoints.credentials.validate_provider_key", dummy_validate_provider_key)
+    monkeypatch.setattr(settings, 'CREDENTIAL_ENCRYPTION_KEY', mock_key)
+
+    # Register
+    client.post("/api/auth/register", json={"email": "fail@ex.com", "username": "fail", "password": "pw"})
+    token = client.post("/api/auth/login", data={"username": "fail@ex.com", "password": "pw"}).json()["access_token"]
+    h = {"Authorization": f"Bearer {token}"}
+
+    # Set valid credential
+    client.post("/api/credentials/", json={"provider_name": "gemini", "api_key": "VALID_KEY"}, headers=h)
+
+    # Tamper with the ciphertext in DB
+    from app.models.credential import UserCredential
+    from app.models.user import User
+    
+    user = db_session.query(User).filter_by(email="fail@ex.com").first()
+    cred = db_session.query(UserCredential).filter_by(user_id=user.id).first()
+    # Fernet ciphertext must start with gAAAAA, replace some characters
+    cred.encrypted_api_key = cred.encrypted_api_key[:-5] + "XXXXX"
+    db_session.commit()
+
+    # Attempt to use it
+    resp = client.post("/api/conversations/", headers=h, json={
+        "title": "Should Fail",
+        "ai_provider": "gemini",
+        "ai_model": "gemini-3.6-flash",
+        "ai_execution_target": "hosted",
+        "ai_temperature": 0.7
+    })
+    
+    # Should get a 400 error because decryption fails, not fallback to system key
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "decryption_failed"
