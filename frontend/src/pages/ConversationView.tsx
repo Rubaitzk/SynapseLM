@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 import { useParams, useNavigate } from 'react-router-dom';
 
@@ -14,7 +14,7 @@ import { Modal } from '../components/ui/Modal';
 
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare, Share2, Copy, Check, Clock, GitFork } from 'lucide-react';
+import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare, Share2, Copy, Check, Clock, GitFork, CheckCircle, X } from 'lucide-react';
 
 export default function ConversationView() {
   const { id } = useParams<{ id: string }>();
@@ -34,6 +34,12 @@ export default function ConversationView() {
 
   const [participants, setParticipants] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [branchRequest, setBranchRequest] = useState<any>(null);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
+  const pendingRequests = useMemo(() => {
+    return requests.filter(r => r.status === 'pending');
+  }, [requests]);
 
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
@@ -149,6 +155,16 @@ export default function ConversationView() {
     }
   };
 
+  const fetchBranchRequest = async () => {
+    if (!id) return;
+    try {
+      const res = await api.get(`/conversations/${id}/branch-request`);
+      setBranchRequest(res.data);
+    } catch (err: any) {
+      // Ignored if not a branch or unauthenticated
+    }
+  };
+
   const fetchActiveShares = async () => {
     if (!id) return;
     setLoadingActiveShares(true);
@@ -248,6 +264,7 @@ export default function ConversationView() {
     fetchMessages();
     fetchPresence();
     fetchRequests();
+    fetchBranchRequest();
   }, [id]);
 
 
@@ -340,11 +357,33 @@ export default function ConversationView() {
 
             });
 
-                      } else if (data.event === 'participant.added') {
-              fetchParticipants();
-            } else if (data.event === 'request.created' || data.event === 'request.accepted' || data.event === 'request.rejected' || data.event === 'request.cancelled') {
-              fetchRequests();
-              if (data.event === 'request.accepted') fetchParticipants();
+          } else if (data.event === 'participant.added') {
+            fetchParticipants();
+          } else if (data.event === 'request.created') {
+            fetchRequests();
+          } else if (data.event === 'request.accepted') {
+            fetchRequests();
+            fetchParticipants();
+            if (data.requester_id === user?.id) {
+              addToast(
+                `Your collaboration request was approved! You are now a participant in "${data.conversation_title || 'the conversation'}".`,
+                'success'
+              );
+              fetchConversation();
+              fetchBranchRequest();
+            }
+          } else if (data.event === 'request.rejected') {
+            fetchRequests();
+            if (data.requester_id === user?.id) {
+              addToast(
+                `Your collaboration request for "${data.conversation_title || 'the conversation'}" was declined. You can continue chatting privately in this branch.`,
+                'info'
+              );
+              fetchBranchRequest();
+            }
+          } else if (data.event === 'request.cancelled') {
+            fetchRequests();
+            fetchBranchRequest();
             } else if (data.event === 'message.created') {
 
              setMessages(prev => {
@@ -619,13 +658,20 @@ export default function ConversationView() {
 
   
   const handleRequestAction = async (reqId: string, action: 'accept' | 'reject') => {
+    if (actionLoading[reqId]) return;
+    setActionLoading(prev => ({ ...prev, [reqId]: true }));
     try {
       await api.post(`/conversations/${id}/requests/${reqId}/${action}`);
-      addToast(`Request ${action}ed`, 'success');
-      fetchRequests();
-      if (action === 'accept') fetchParticipants();
+      addToast(`Request ${action === 'accept' ? 'accepted' : 'rejected'} successfully`, 'success');
+      await fetchRequests();
+      if (action === 'accept') {
+        await fetchParticipants();
+      }
     } catch (err: any) {
       addToast(err.response?.data?.detail || `Failed to ${action} request`, 'error');
+      await fetchRequests();
+    } finally {
+      setActionLoading(prev => ({ ...prev, [reqId]: false }));
     }
   };
 
@@ -823,17 +869,48 @@ export default function ConversationView() {
                 aria-label="Toggle sidebar"
               >
                 <PanelRight size={20} />
-                {requests.length > 0 && isOwner && (
+                {pendingRequests.length > 0 && isOwner && (
                   <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-500 border-2 border-white rounded-full"></span>
                 )}
               </button>
             </div>
           </div>
 
-          {isArchived && (
+          {isBranch && isArchived && (
+            <div className="bg-emerald-50 border-b border-emerald-200 px-6 py-3 flex items-center justify-between text-xs text-emerald-900">
+              <div className="flex items-center">
+                <CheckCircle size={16} className="mr-2 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Collaboration access approved!</strong> This branch is archived as a read-only snapshot.
+                </span>
+              </div>
+              {conversation.parent_conversation_id && (
+                <Button 
+                  size="sm" 
+                  onClick={() => navigate(`/conversations/${conversation.parent_conversation_id}`)}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white ml-3 shrink-0"
+                >
+                  Open Main Conversation &rarr;
+                </Button>
+              )}
+            </div>
+          )}
+
+          {isBranch && !isArchived && branchRequest?.status === 'pending' && (
             <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center text-xs text-amber-800">
-              <AlertCircle size={15} className="mr-2 text-amber-600 shrink-0" />
-              <span>This branch was archived when collaboration access was approved. Read-only snapshot. Future messages should be sent in the main conversation.</span>
+              <Clock size={15} className="mr-2 text-amber-600 shrink-0" />
+              <span>
+                <strong>Collaboration request pending owner approval.</strong> Messages in this branch remain private until approved.
+              </span>
+            </div>
+          )}
+
+          {isBranch && !isArchived && branchRequest?.status === 'rejected' && (
+            <div className="bg-gray-100 border-b border-gray-200 px-6 py-2.5 flex items-center text-xs text-gray-700">
+              <AlertCircle size={15} className="mr-2 text-gray-500 shrink-0" />
+              <span>
+                <strong>Collaboration request was declined.</strong> You can continue chatting privately with AI in this branch.
+              </span>
             </div>
           )}
 
@@ -988,116 +1065,147 @@ export default function ConversationView() {
 
         {/* Right Sidebar - Participants & Requests */}
         {sidebarOpen && (
-        <div className="hidden lg:flex w-72 flex-col bg-white border-l border-gray-200 shrink-0">
-          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900 flex items-center text-sm">
-              <Users size={18} className="mr-2" />
-              Participants ({participants.length})
-            </h3>
-            {conversation.team_id && (
-              <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded font-medium">Team</span>
-            )}
-          </div>
+        <>
+          <div 
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <div className="fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] flex flex-col bg-white shadow-2xl border-l border-gray-200 lg:static lg:w-72 lg:z-auto lg:shadow-none shrink-0 transition-all">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <h3 className="font-semibold text-gray-900 flex items-center text-sm">
+                  <Users size={18} className="mr-2" />
+                  Participants ({participants.length})
+                </h3>
+                {conversation.team_id && (
+                  <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded font-medium">Team</span>
+                )}
+              </div>
+              <button 
+                onClick={() => setSidebarOpen(false)}
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 lg:hidden"
+                title="Close sidebar"
+                aria-label="Close sidebar"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-          {requests.length > 0 && isOwner && (
-          <div className="p-4 border-b border-gray-200 bg-amber-50">
-            <h3 className="font-semibold text-gray-900 flex items-center mb-3 text-sm">
-              <Users size={16} className="mr-2 text-amber-600" />
-              Pending Requests ({requests.length})
-            </h3>
-            <div className="space-y-3">
-              {requests.map(req => (
-                <div key={req.id} className="text-sm border border-amber-200 bg-white p-2.5 rounded shadow-sm">
-                  <div className="font-medium text-gray-900 truncate mb-1">
-                    {req.requester?.username || req.requester_id}
+            {pendingRequests.length > 0 && isOwner && (
+            <div className="p-4 border-b border-gray-200 bg-amber-50">
+              <h3 className="font-semibold text-gray-900 flex items-center mb-3 text-sm">
+                <Users size={16} className="mr-2 text-amber-600" />
+                Pending Requests ({pendingRequests.length})
+              </h3>
+              <div className="space-y-3">
+                {pendingRequests.map(req => (
+                  <div key={req.id} className="text-sm border border-amber-200 bg-white p-2.5 rounded shadow-sm">
+                    <div className="font-medium text-gray-900 truncate mb-1">
+                      {req.requester?.username || req.requester_id}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mb-2">
+                      Requested collaboration access
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        className="flex-1 py-1 h-auto text-xs" 
+                        disabled={Boolean(actionLoading[req.id])}
+                        onClick={() => handleRequestAction(req.id, 'accept')}
+                      >
+                        {actionLoading[req.id] ? 'Processing...' : 'Accept'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="flex-1 py-1 h-auto text-xs" 
+                        disabled={Boolean(actionLoading[req.id])}
+                        onClick={() => handleRequestAction(req.id, 'reject')}
+                      >
+                        Reject
+                      </Button>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-gray-500 mb-2">
-                    Requested collaboration access
+                ))}
+              </div>
+            </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {participants.map(p => (
+                <div key={p.id} className="flex items-center justify-between group">
+                  <div className="flex items-center min-w-0">
+                    <div className="relative mr-3">
+                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0">
+                        {(p.user?.username || p.user_id)[0].toUpperCase()}
+                      </div>
+                      {activeUsers[p.user_id] && (
+                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></span>
+                      )}
+                    </div>
+                    <span className="text-sm font-medium text-gray-900 truncate">
+                      {p.user?.username || p.user_id}
+                    </span>
                   </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'accept')}>Accept</Button>
-                    <Button size="sm" variant="ghost" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'reject')}>Reject</Button>
-                  </div>
+
+                  {isOwner && p.user_id !== user?.id && (
+                    <button 
+                      onClick={() => setMemberToRemove(p.user_id)}
+                      className="text-xs text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-700 font-medium"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-          )}
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {participants.map(p => (
-              <div key={p.id} className="flex items-center justify-between group">
-                <div className="flex items-center min-w-0">
-                  <div className="relative mr-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0">
-                      {(p.user?.username || p.user_id)[0].toUpperCase()}
-                    </div>
-                    {activeUsers[p.user_id] && (
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></span>
-                    )}
-                  </div>
-                  <span className="text-sm font-medium text-gray-900 truncate">
-                    {p.user?.username || p.user_id}
-                  </span>
+            <div className="p-4 border-t border-gray-200 space-y-4">
+              {conversation.team_id && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Member</h4>
+                  <form onSubmit={handleAddParticipant} className="space-y-2">
+                    <select 
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={selectedUser}
+                      onChange={(e) => setSelectedUser(e.target.value)}
+                    >
+                      <option value="">Select a team member...</option>
+                      {availableMembers.map(m => (
+                        <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
+                      ))}
+                    </select>
+                    <Button type="submit" variant="secondary" className="w-full text-sm" disabled={!selectedUser}>
+                      Add to Chat
+                    </Button>
+                  </form>
                 </div>
+              )}
 
-                {isOwner && p.user_id !== user?.id && (
-                  <button 
-                    onClick={() => setMemberToRemove(p.user_id)}
-                    className="text-xs text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-700 font-medium"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="p-4 border-t border-gray-200 space-y-4">
-            {conversation.team_id && (
-              <div>
-                <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Member</h4>
-                <form onSubmit={handleAddParticipant} className="space-y-2">
-                  <select 
-                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    value={selectedUser}
-                    onChange={(e) => setSelectedUser(e.target.value)}
-                  >
-                    <option value="">Select a team member...</option>
-                    {availableMembers.map(m => (
-                      <option key={m.user_id} value={m.user_id}>{m.user?.username || m.user_id}</option>
-                    ))}
-                  </select>
-                  <Button type="submit" variant="secondary" className="w-full text-sm" disabled={!selectedUser}>
-                    Add to Chat
+              {!conversation.team_id && isOwner && !isBranch && (
+                <div>
+                  <Button variant="secondary" className="w-full text-sm" onClick={handleOpenShare}>
+                    <Share2 size={15} className="mr-2 text-blue-600" />
+                    Share Conversation
                   </Button>
-                </form>
-              </div>
-            )}
+                </div>
+              )}
 
-            {!conversation.team_id && isOwner && !isBranch && (
-              <div>
-                <Button variant="secondary" className="w-full text-sm" onClick={handleOpenShare}>
-                  <Share2 size={15} className="mr-2 text-blue-600" />
-                  Share Conversation
-                </Button>
-              </div>
-            )}
-
-            {isOwner && (
-              <div className="pt-2 border-t border-gray-100">
-                <Button 
-                  variant="danger" 
-                  className="w-full text-sm" 
-                  onClick={() => setDeleteModalOpen(true)}
-                >
-                  <Trash2 size={16} className="mr-2" />
-                  Delete Chat
-                </Button>
-              </div>
-            )}
+              {isOwner && (
+                <div className="pt-2 border-t border-gray-100">
+                  <Button 
+                    variant="danger" 
+                    className="w-full text-sm" 
+                    onClick={() => setDeleteModalOpen(true)}
+                  >
+                    <Trash2 size={16} className="mr-2" />
+                    Delete Chat
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
         )}
       </div>
 
