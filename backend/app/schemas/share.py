@@ -18,3 +18,5 @@ class SharedConversationPreviewResponse(BaseModel):
     title: str
     owner_username: str
     expires_at: Optional[datetime] = None
+    conversation_id: Optional[str] = None
+    is_participant: bool = False

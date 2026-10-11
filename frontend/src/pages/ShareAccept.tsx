@@ -34,12 +34,23 @@ export default function ShareAccept() {
   const handleRequestAccess = async () => {
     setRequesting(true);
     try {
-      await api.post(`/shares/${token}/requests`);
-      addToast("Access request sent. Waiting for approval.", "success");
-      // Maybe navigate to a pending requests page or home
-      navigate('/');
+      // Step 1: Create a branch of the conversation
+      const branchRes = await api.post(`/shares/${token}/branches`);
+      const branchId = branchRes.data.id;
+
+      // Step 2: Request collaboration access via this branch
+      await api.post(`/shares/${token}/requests`, { branch_conversation_id: branchId });
+      addToast("Access requested! You can chat in your private branch while awaiting owner approval.", "success");
+      navigate(`/conversations/${branchId}`);
     } catch (err: any) {
-      addToast(err.response?.data?.detail || "Failed to request access", "error");
+      if (err.response?.status === 400 && err.response?.data?.detail === "You are already a participant in this conversation") {
+        addToast("You are already a participant in this conversation.", "info");
+        if (preview?.conversation_id) {
+          navigate(`/conversations/${preview.conversation_id}`);
+        }
+      } else {
+        addToast(err.response?.data?.detail || "Failed to request access", "error");
+      }
     } finally {
       setRequesting(false);
     }
@@ -53,10 +64,12 @@ export default function ShareAccept() {
       navigate(`/conversations/${res.data.id}`);
     } catch (err: any) {
       if (err.response?.status === 400 && err.response?.data?.detail === "You are already a participant in this conversation") {
-          // If already a participant, we could fetch the conversation ID if the backend returned it, but it didn't. 
-          addToast("You are already a participant in this conversation.", "info");
+        addToast("You are already a participant in this conversation.", "info");
+        if (preview?.conversation_id) {
+          navigate(`/conversations/${preview.conversation_id}`);
+        }
       } else {
-          addToast(err.response?.data?.detail || "Failed to create branch", "error");
+        addToast(err.response?.data?.detail || "Failed to create branch", "error");
       }
     } finally {
       setBranching(false);
@@ -94,28 +107,52 @@ export default function ShareAccept() {
         <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4">
           <Share2 size={32} />
         </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Shared Conversation</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-1">Shared Conversation</h2>
         <p className="text-xl font-medium text-gray-800 mb-1">{preview.title}</p>
-        <p className="text-gray-500 mb-8">Shared by {preview.owner_username}</p>
-        
-        <div className="flex flex-col sm:flex-row gap-4 w-full">
-          <Button 
-            className="flex-1" 
-            variant="secondary"
-            onClick={handleBranch}
-            disabled={branching || requesting}
-          >
-            {branching ? 'Branching...' : 'Branch Conversation'}
-          </Button>
-          <Button 
-            className="flex-1" 
-            onClick={handleRequestAccess}
-            disabled={requesting || branching}
-          >
-            {requesting ? 'Requesting...' : 'Request Access'}
-            {!requesting && <ArrowRight className="ml-2 w-4 h-4" />}
-          </Button>
-        </div>
+        <p className="text-gray-500 mb-2">Shared by {preview.owner_username}</p>
+        {preview.expires_at && (
+          <p className="text-xs text-amber-600 mb-6">
+            Expires: {new Date(preview.expires_at).toLocaleString()}
+          </p>
+        )}
+
+        {preview.is_participant && preview.conversation_id ? (
+          <div className="w-full space-y-4 mt-4">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+              You are already an authorized participant in this conversation.
+            </div>
+            <Button className="w-full" onClick={() => navigate(`/conversations/${preview.conversation_id}`)}>
+              Open Conversation
+              <ArrowRight className="ml-2 w-4 h-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="w-full space-y-6 mt-4">
+            <div className="text-xs text-gray-500 bg-gray-50 p-4 rounded-lg border border-gray-200 text-left space-y-1.5">
+              <p><strong>Branch Conversation:</strong> Creates an isolated copy of this chat snapshot to experiment with AI without altering the original.</p>
+              <p><strong>Request Access:</strong> Creates your branch and asks the owner for direct collaboration access on the main chat.</p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 w-full">
+              <Button 
+                className="flex-1" 
+                variant="secondary"
+                onClick={handleBranch}
+                disabled={branching || requesting}
+              >
+                {branching ? 'Branching...' : 'Branch Conversation'}
+              </Button>
+              <Button 
+                className="flex-1" 
+                onClick={handleRequestAccess}
+                disabled={requesting || branching}
+              >
+                {requesting ? 'Requesting...' : 'Request Access'}
+                {!requesting && <ArrowRight className="ml-2 w-4 h-4" />}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

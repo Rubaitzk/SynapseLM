@@ -18,8 +18,7 @@ class RealtimeManager:
         # user_id -> dict of user info
         self.user_info: Dict[str, dict] = {}
         
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.redis = redis.from_url(redis_url, decode_responses=True)
+        self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
         
     async def connect(self, websocket: WebSocket, conversation_id: str, user_id: str, user_name: str, connection_id: str):
         await websocket.accept()

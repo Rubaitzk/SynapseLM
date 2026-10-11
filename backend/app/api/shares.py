@@ -23,10 +23,16 @@ def preview_share(share_token: str, db: Session = Depends(deps.get_db), current_
     from app.crud import crud_user
     owner = crud_user.get_user(db, share.conversation.owner_id) if share.conversation.owner_id else None
     
+    is_owner = (current_user.id == share.conversation.owner_id)
+    participant = crud_conversation.get_participant(db, share.conversation_id, current_user.id)
+    is_participant = (participant is not None) or is_owner
+    
     return SharedConversationPreviewResponse(
         title=share.conversation.title,
         owner_username=owner.username if owner else "Unknown",
-        expires_at=share.expires_at
+        expires_at=share.expires_at,
+        conversation_id=share.conversation_id if is_participant else None,
+        is_participant=is_participant
     )
 
 @router.post("/{share_token}/branches", response_model=ConversationResponse)

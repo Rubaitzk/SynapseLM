@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
-from app.models.conversation import SenderType, ExecutionTarget
+from app.models.conversation import SenderType, ExecutionTarget, LifecycleState
 from app.schemas.user import UserResponse
 
 class ConversationBase(BaseModel):
@@ -33,6 +33,9 @@ class ConversationResponse(ConversationBase):
     ai_execution_target: ExecutionTarget
     ai_system_instructions: Optional[str] = None
     ai_temperature: float
+    parent_conversation_id: Optional[str] = None
+    snapshot_sequence_id: Optional[int] = None
+    lifecycle_state: LifecycleState = LifecycleState.active
 
     class Config:
         from_attributes = True

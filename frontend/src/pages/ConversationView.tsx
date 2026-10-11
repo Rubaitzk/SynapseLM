@@ -13,22 +13,24 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 
 import { useToast } from '../context/ToastContext';
-
-import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare } from 'lucide-react';
-
-
+import { useAuth } from '../context/AuthContext';
+import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare, Share2, Copy, Check, Clock, GitFork } from 'lucide-react';
 
 export default function ConversationView() {
-
   const { id } = useParams<{ id: string }>();
-
   const navigate = useNavigate();
-
   const { addToast } = useToast();
-
-  
+  const { user } = useAuth();
 
   const [conversation, setConversation] = useState<any>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareLink, setShareLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [shareExpiry, setShareExpiry] = useState<number | ''>('');
+  const [activeShares, setActiveShares] = useState<any[]>([]);
+  const [loadingActiveShares, setLoadingActiveShares] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   const [participants, setParticipants] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
@@ -136,82 +138,116 @@ export default function ConversationView() {
 
   
   const fetchRequests = async () => {
+    if (!id) return;
     try {
       const res = await api.get(`/conversations/${id}/requests`);
       setRequests(res.data);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      if (err.response?.status !== 403) {
+        console.error(err);
+      }
+    }
+  };
+
+  const fetchActiveShares = async () => {
+    if (!id) return;
+    setLoadingActiveShares(true);
+    try {
+      const res = await api.get(`/conversations/${id}/shares`);
+      setActiveShares(res.data.filter((s: any) => s.is_active));
+    } catch (err: any) {
+      if (err.response?.status !== 403) {
+        console.error("Failed to fetch active shares", err);
+      }
+    } finally {
+      setLoadingActiveShares(false);
+    }
+  };
+
+  const handleOpenShare = () => {
+    setShareModalOpen(true);
+    setShareLink('');
+    setCopied(false);
+    fetchActiveShares();
+  };
+
+  const handleCreateShare = async () => {
+    if (shareLoading) return;
+    setShareLoading(true);
+    try {
+      const payload: any = {};
+      if (shareExpiry && Number(shareExpiry) > 0) {
+        payload.expires_in_seconds = Number(shareExpiry);
+      }
+      const res = await api.post(`/conversations/${id}/shares`, payload);
+      const generatedUrl = `${window.location.origin}/shares/${res.data.share_token}`;
+      setShareLink(generatedUrl);
+      addToast("Share link created!", "success");
+      fetchActiveShares();
+    } catch (err: any) {
+      addToast(err.response?.data?.detail || "Failed to create share link", "error");
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleCopyLink = (linkToCopy?: string) => {
+    const target = linkToCopy || shareLink;
+    if (!target) return;
+    navigator.clipboard.writeText(target);
+    setCopied(true);
+    addToast("Share link copied to clipboard!", "success");
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleRevokeShare = async (shareId: string) => {
+    setRevokingId(shareId);
+    try {
+      await api.post(`/conversations/${id}/shares/${shareId}/revoke`);
+      addToast("Share link revoked", "success");
+      fetchActiveShares();
+    } catch (err: any) {
+      addToast(err.response?.data?.detail || "Failed to revoke share link", "error");
+    } finally {
+      setRevokingId(null);
     }
   };
 
   const fetchParticipants = async () => {
-
     try {
-
       const res = await api.get(`/conversations/${id}/participants`);
-
       setParticipants(res.data);
-
     } catch (err) {
-
       console.error(err);
-
     }
-
   };
-
-
 
   const fetchMessages = async () => {
-
     try {
-
       const res = await api.get(`/conversations/${id}/messages?page=1&size=50`);
-
       setMessages(res.data.items);
-
     } catch (err) {
-
       console.error(err);
-
     }
-
   };
-
-
 
   const fetchPresence = async () => {
-
     try {
-
       const res = await api.get(`/conversations/${id}/presence`);
-
       const map: Record<string, boolean> = {};
-
       res.data.active_users.forEach((u: any) => map[u.id] = true);
-
       setActiveUsers(map);
-
     } catch (err) {
-
       console.error(err);
-
     }
-
   };
 
-
-
   useEffect(() => {
-
     fetchConversation();
-
     fetchParticipants();
-
     fetchMessages();
-
     fetchPresence();
-
+    fetchRequests();
   }, [id]);
 
 
@@ -232,15 +268,15 @@ export default function ConversationView() {
 
       
 
-      // Determine base URL dynamically or fallback to localhost:8000
-
-      const host = window.location.hostname === 'localhost' ? 'localhost:8000' : window.location.host;
-
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-      // If vite proxies /api, it might proxy /ws as well, but standard is direct
-
-      const wsUrl = `${wsProtocol}//${host}/ws/${id}?token=${token}`;
+      const envWsUrl = import.meta.env.VITE_WS_BASE_URL;
+      let wsUrl = '';
+      if (envWsUrl) {
+        wsUrl = `${envWsUrl.replace(/\/$/, '')}/ws/${id}?token=${token}`;
+      } else {
+        const host = window.location.hostname === 'localhost' ? 'localhost:8000' : window.location.host;
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${wsProtocol}//${host}/ws/${id}?token=${token}`;
+      }
 
       
 
@@ -720,79 +756,86 @@ export default function ConversationView() {
 
 
   const availableMembers = teamMembers.filter(m => !participants.find(p => p.user_id === m.user_id));
-
-
+  const isOwner = Boolean(user && conversation && conversation.owner_id === user.id);
+  const isBranch = Boolean(conversation?.parent_conversation_id);
+  const isArchived = conversation?.lifecycle_state === 'archived';
 
   return (
-
     <AppLayout>
-
       <div className="flex-1 flex overflow-hidden">
-
-        
-
         {/* Main Chat Area */}
-
         <div className="flex-1 flex flex-col bg-gray-50 min-w-0">
-
-          
-
           {/* Header */}
-
           <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
-
             <div>
-
               <h2 className="text-xl font-bold text-gray-900 truncate">{conversation.title || 'Untitled'}</h2>
-
               <div className="flex items-center text-xs text-gray-500 mt-1 space-x-3">
-
                 <span className="flex items-center">
-
                   <span className={`w-2 h-2 rounded-full mr-1.5 ${
-
                     connectionStatus === 'connected' ? 'bg-green-500' :
-
                     connectionStatus === 'connecting' || connectionStatus === 'reconnecting' ? 'bg-amber-500' : 'bg-red-500'
-
                   }`}></span>
-
                   {connectionStatus === 'connected' ? 'Connected' :
-
                    connectionStatus === 'connecting' ? 'Connecting...' :
-
                    connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Offline'}
-
                 </span>
-
                 <span>•</span>
-
-                <span>{participants.length} participants</span>
-
+                <span>{participants.length} {participants.length === 1 ? 'participant' : 'participants'}</span>
+                {isBranch && (
+                  <>
+                    <span>•</span>
+                    <span className="text-purple-600 font-medium">Branched snapshot</span>
+                  </>
+                )}
               </div>
-
             </div>
 
-            
-
             <div className="flex items-center gap-2">
-              {/* V2 Extension Point: Action Menu (Share, Rename, Add to Team, Archive) */}
+              {isBranch && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
+                  <GitFork size={12} className="mr-1" />
+                  Branch
+                </span>
+              )}
+
+              {!isBranch && (
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  onClick={handleOpenShare}
+                  disabled={!isOwner}
+                  title={isOwner ? "Share conversation with others" : "Only the conversation owner can create share links"}
+                >
+                  <Share2 size={15} className={`mr-1.5 ${!isOwner ? 'opacity-40' : 'text-blue-600'}`} />
+                  <span className={!isOwner ? 'opacity-50' : ''}>Share</span>
+                </Button>
+              )}
+
               <Button variant="secondary" size="sm" onClick={() => setShowConfig(true)}>
                 <Cpu size={16} className="mr-2" />
                 AI: {conversation.ai_provider}
               </Button>
-              {conversation.team_id && (
-                <button 
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-                  title="Toggle sidebar"
-                >
-                  <PanelRight size={20} />
-                </button>
-              )}
-            </div>
 
+              <button 
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="relative p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                title="Toggle sidebar"
+                aria-label="Toggle sidebar"
+              >
+                <PanelRight size={20} />
+                {requests.length > 0 && isOwner && (
+                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-500 border-2 border-white rounded-full"></span>
+                )}
+              </button>
+            </div>
           </div>
+
+          {isArchived && (
+            <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center text-xs text-amber-800">
+              <AlertCircle size={15} className="mr-2 text-amber-600 shrink-0" />
+              <span>This branch was archived when collaboration access was approved. Read-only snapshot. Future messages should be sent in the main conversation.</span>
+            </div>
+          )}
 
 
 
@@ -923,68 +966,40 @@ export default function ConversationView() {
               )}
 
               <form onSubmit={handleSend} className="flex gap-2">
-
                 <input
-
                   type="text"
-
-                  className="flex-1 px-4 py-3 bg-gray-50 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors"
-
-                  placeholder="Type your message..."
-
+                  className="flex-1 px-4 py-3 bg-gray-50 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  placeholder={isArchived ? "This branch has been archived (read-only)." : "Type your message..."}
                   value={content}
-
                   onChange={(e) => handleInput(e.target.value)}
-
-                  disabled={connectionStatus !== 'connected'}
-
+                  disabled={connectionStatus !== 'connected' || isArchived}
                 />
-
                 <Button 
-
                   type="submit" 
-
                   className="rounded-full px-6" 
-
-                  disabled={!content.trim() || connectionStatus !== 'connected'}
-
+                  disabled={!content.trim() || connectionStatus !== 'connected' || isArchived}
                 >
-
                   <Send size={18} />
-
                 </Button>
-
               </form>
-
             </div>
-
           </div>
-
         </div>
 
-
-
-        {/* Right Sidebar - Participants */}
-
-        {sidebarOpen && conversation.team_id && (
+        {/* Right Sidebar - Participants & Requests */}
+        {sidebarOpen && (
         <div className="hidden lg:flex w-72 flex-col bg-white border-l border-gray-200 shrink-0">
-
-          <div className="p-4 border-b border-gray-200">
-
-            <h3 className="font-semibold text-gray-900 flex items-center">
-
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="font-semibold text-gray-900 flex items-center text-sm">
               <Users size={18} className="mr-2" />
-
-              Participants
-
+              Participants ({participants.length})
             </h3>
-
+            {conversation.team_id && (
+              <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded font-medium">Team</span>
+            )}
           </div>
 
-          
-
-          
-          {requests.length > 0 && (
+          {requests.length > 0 && isOwner && (
           <div className="p-4 border-b border-gray-200 bg-amber-50">
             <h3 className="font-semibold text-gray-900 flex items-center mb-3 text-sm">
               <Users size={16} className="mr-2 text-amber-600" />
@@ -992,8 +1007,13 @@ export default function ConversationView() {
             </h3>
             <div className="space-y-3">
               {requests.map(req => (
-                <div key={req.id} className="text-sm border border-amber-200 bg-white p-2 rounded">
-                  <div className="font-medium truncate mb-1">{req.requester?.username || req.requester_id}</div>
+                <div key={req.id} className="text-sm border border-amber-200 bg-white p-2.5 rounded shadow-sm">
+                  <div className="font-medium text-gray-900 truncate mb-1">
+                    {req.requester?.username || req.requester_id}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mb-2">
+                    Requested collaboration access
+                  </div>
                   <div className="flex gap-2">
                     <Button size="sm" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'accept')}>Accept</Button>
                     <Button size="sm" variant="ghost" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'reject')}>Reject</Button>
@@ -1005,59 +1025,35 @@ export default function ConversationView() {
           )}
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-
             {participants.map(p => (
-
               <div key={p.id} className="flex items-center justify-between group">
-
                 <div className="flex items-center min-w-0">
-
                   <div className="relative mr-3">
-
                     <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm shrink-0">
-
                       {(p.user?.username || p.user_id)[0].toUpperCase()}
-
                     </div>
-
                     {activeUsers[p.user_id] && (
-
                       <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></span>
-
                     )}
-
                   </div>
-
                   <span className="text-sm font-medium text-gray-900 truncate">
-
                     {p.user?.username || p.user_id}
-
                   </span>
-
                 </div>
 
-                <button 
-
-                  onClick={() => setMemberToRemove(p.user_id)}
-
-                  className="text-xs text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-700 font-medium"
-
-                >
-
-                  Remove
-
-                </button>
-
+                {isOwner && p.user_id !== user?.id && (
+                  <button 
+                    onClick={() => setMemberToRemove(p.user_id)}
+                    className="text-xs text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-700 font-medium"
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
-
             ))}
-
           </div>
 
-
-
-          <div className="p-4 border-t border-gray-200 space-y-6">
-
+          <div className="p-4 border-t border-gray-200 space-y-4">
             {conversation.team_id && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 mb-3">Add Member</h4>
@@ -1079,30 +1075,28 @@ export default function ConversationView() {
               </div>
             )}
 
-            
+            {!conversation.team_id && isOwner && !isBranch && (
+              <div>
+                <Button variant="secondary" className="w-full text-sm" onClick={handleOpenShare}>
+                  <Share2 size={15} className="mr-2 text-blue-600" />
+                  Share Conversation
+                </Button>
+              </div>
+            )}
 
-            <div className="pt-4 border-t border-gray-100">
-
-               <Button 
-
+            {isOwner && (
+              <div className="pt-2 border-t border-gray-100">
+                <Button 
                   variant="danger" 
-
                   className="w-full text-sm" 
-
                   onClick={() => setDeleteModalOpen(true)}
-
-               >
-
+                >
                   <Trash2 size={16} className="mr-2" />
-
                   Delete Chat
-
-               </Button>
-
-            </div>
-
+                </Button>
+              </div>
+            )}
           </div>
-
         </div>
         )}
       </div>
@@ -1244,24 +1238,133 @@ export default function ConversationView() {
 
 
       <Modal isOpen={!!memberToRemove} onClose={() => setMemberToRemove(null)} title="Remove Participant?">
-
         <p className="text-gray-600 mb-6">
-
           Are you sure you want to remove this participant? They will immediately lose access to the conversation.
-
         </p>
-
         <div className="flex justify-end gap-3">
-
           <Button variant="ghost" onClick={() => setMemberToRemove(null)}>Cancel</Button>
-
           <Button variant="danger" onClick={confirmRemoveParticipant}>Remove</Button>
-
         </div>
-
       </Modal>
 
+      {/* Share Modal */}
+      <Modal isOpen={shareModalOpen} onClose={() => setShareModalOpen(false)} title="Share Conversation">
+        <div className="space-y-5">
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3.5 text-xs text-blue-800 leading-relaxed">
+            <p className="font-semibold mb-1 flex items-center">
+              <Share2 size={14} className="mr-1.5 text-blue-600" />
+              How sharing works in SynapseLM
+            </p>
+            <p>
+              Recipients receive a read-only preview of the conversation. They can <strong>branch</strong> the conversation to continue chatting with AI in their own private copy, or <strong>request collaboration access</strong> to join this chat.
+            </p>
+          </div>
 
+          <div className="space-y-3">
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider">
+              Link Expiration
+            </label>
+            <div className="flex gap-2">
+              <select 
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                value={shareExpiry}
+                onChange={(e) => setShareExpiry(e.target.value ? Number(e.target.value) : '')}
+                disabled={shareLoading}
+              >
+                <option value="">Never expires</option>
+                <option value="3600">1 hour</option>
+                <option value="86400">24 hours</option>
+                <option value="604800">7 days</option>
+                <option value="2592000">30 days</option>
+              </select>
+
+              <Button 
+                onClick={handleCreateShare} 
+                disabled={shareLoading}
+                className="whitespace-nowrap"
+              >
+                {shareLoading ? 'Generating...' : 'Create Link'}
+              </Button>
+            </div>
+          </div>
+
+          {shareLink && (
+            <div className="space-y-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <span className="block text-xs font-semibold text-gray-700">Generated Share Link</span>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={shareLink}
+                  className="flex-1 px-3 py-1.5 bg-white border border-gray-300 rounded text-xs font-mono select-all focus:outline-none"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <Button 
+                  size="sm" 
+                  onClick={() => handleCopyLink(shareLink)}
+                  className="shrink-0 flex items-center gap-1.5"
+                >
+                  {copied ? (
+                    <>
+                      <Check size={14} className="text-green-300" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Share this link with anyone you want to give preview or branch access to.
+              </p>
+            </div>
+          )}
+
+          {/* Active shares list */}
+          <div className="pt-3 border-t border-gray-100 space-y-2.5">
+            <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider flex items-center justify-between">
+              <span>Active Share Links</span>
+              {loadingActiveShares && <span className="text-[11px] font-normal text-gray-400">Loading...</span>}
+            </h4>
+
+            {activeShares.length === 0 && !loadingActiveShares ? (
+              <p className="text-xs text-gray-500 py-1">No active share links. Generate one above to share.</p>
+            ) : (
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {activeShares.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between p-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs">
+                    <div>
+                      <div className="font-medium text-gray-800 flex items-center">
+                        <Clock size={12} className="mr-1 text-gray-400" />
+                        {s.expires_at ? `Expires ${new Date(s.expires_at).toLocaleString()}` : 'Never expires'}
+                      </div>
+                      <div className="text-[11px] text-gray-400">
+                        Created {new Date(s.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-red-600 hover:text-red-700 text-xs py-1 h-auto"
+                      disabled={revokingId === s.id}
+                      onClick={() => handleRevokeShare(s.id)}
+                    >
+                      {revokingId === s.id ? 'Revoking...' : 'Revoke'}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-gray-100">
+            <Button variant="ghost" onClick={() => setShareModalOpen(false)}>Close</Button>
+          </div>
+        </div>
+      </Modal>
 
     </AppLayout>
 
