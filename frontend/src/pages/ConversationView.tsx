@@ -419,7 +419,7 @@ export default function ConversationView() {
       ws.current.onclose = (event) => {
         if (event.code === 1008) {
           isRevokedRef.current = true;
-          setConnectionStatus('disconnected');
+          setConnectionStatus('offline');
           return;
         }
         if (isRevokedRef.current) return;
