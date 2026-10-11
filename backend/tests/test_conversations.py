@@ -26,7 +26,7 @@ def test_conversation_flow(client):
     assert res.status_code == 403
 
     # User 1 creates conversation
-    res = client.post("/api/conversations/", json={"title": "Design Talk", "team_id": team_id}, headers=h1)
+    res = client.post("/api/conversations/", json={"title": "Design Talk", "team_id": team_id, "ai_provider": "mock", "ai_model": "mock"}, headers=h1)
     assert res.status_code == 201
     conv_id = res.json()["id"]
 
