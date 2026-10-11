@@ -42,7 +42,7 @@ def test_create_conversation_missing_credentials(client, monkeypatch):
     res = client.post("/api/conversations/", json={
         "title": "Missing Creds Test",
         "ai_provider": "gemini",
-        "ai_model": "gemini-3.8-flash"
+        "ai_model": "gemini-3.6-flash"
     }, headers=h)
     
     assert res.status_code == 400
@@ -56,23 +56,21 @@ def test_create_conversation_explicit_selection_success(client, monkeypatch):
     res = client.post("/api/conversations/", json={
         "title": "Valid Combo Test",
         "ai_provider": "gemini",
-        "ai_model": "gemini-3.8-flash"
+        "ai_model": "gemini-3.6-flash"
     }, headers=h)
     
     assert res.status_code == 201
     data = res.json()
     assert data["ai_provider"] == "gemini"
-    assert data["ai_model"] == "gemini-3.8-flash"
+    assert data["ai_model"] == "gemini-3.6-flash"
 
 def test_send_message_missing_credentials(client, monkeypatch):
     # First, create with a valid fake key
     monkeypatch.setattr(settings, "LLM_API_KEY", "fake-key")
     h = get_auth_headers(client)
-    conv_id = client.post("/api/conversations/", json={
-        "title": "Valid Combo Test",
-        "ai_provider": "gemini",
-        "ai_model": "gemini-3.8-flash"
-    }, headers=h).json()["id"]
+    res = client.post('/api/conversations/', json={'title': 'Valid Combo Test', 'ai_provider': 'gemini', 'ai_model': 'gemini-3.6-flash'}, headers=h)
+    assert res.status_code == 201, res.text
+    conv_id = res.json()['id']
 
     # Now, simulate the key being wiped or unconfigured before the message is sent
     monkeypatch.setattr(settings, "LLM_API_KEY", "")
@@ -84,3 +82,49 @@ def test_send_message_missing_credentials(client, monkeypatch):
     assert res.status_code == 400
     data = res.json()
     assert data["error_code"] == "provider_configuration_missing"
+
+def test_create_conversation_default_model_resolution(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "fake-key")
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "gemini")
+    monkeypatch.setattr(settings, "LLM_MODEL", "gemini-3.6-flash")
+    
+    h = get_auth_headers(client)
+    res = client.post("/api/conversations/", json={
+        "title": "Default Model Test"
+    }, headers=h)
+    
+    assert res.status_code == 201
+    data = res.json()
+    assert data["ai_provider"] == "gemini"
+    assert data["ai_model"] == "gemini-3.6-flash"
+
+def test_send_message_obsolete_model_upgrade(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "fake-key")
+    h = get_auth_headers(client)
+    
+    res = client.post("/api/conversations/", json={
+        "title": "Obsolete Model Test",
+        "ai_provider": "gemini",
+        "ai_model": "gemini-3.6-flash" # Create with valid model first
+    }, headers=h)
+    assert res.status_code == 201, res.text
+    conv_id = res.json()["id"]
+    
+    # We mock get_conversation to return a conversation with an obsolete model
+    import app.crud.crud_conversation as crud_conv
+    original_get = crud_conv.get_conversation
+    
+    def mock_get_conversation(db, cid, **kwargs):
+        conv = original_get(db, cid, **kwargs)
+        if conv and cid == conv_id:
+            conv.ai_model = "gemini-1.5-flash"
+        return conv
+        
+    monkeypatch.setattr(crud_conv, "get_conversation", mock_get_conversation)
+    
+    # Now send a message, it should succeed by auto-upgrading in memory
+    res_msg = client.post(f"/api/conversations/{conv_id}/messages", json={
+        "content": "Hello obsolete model"
+    }, headers=h)
+    
+    assert res_msg.status_code == 200, res_msg.text

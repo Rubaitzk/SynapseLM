@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/synapselm")
     
     # LLM Provider Configuration
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "mock")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "mock")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.6-flash")
 
     class Config:
         case_sensitive = True

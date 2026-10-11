@@ -12,7 +12,7 @@ import uuid
 from app.services.llm.exceptions import ProviderConfigurationError
 
 SUPPORTED_MODELS = {
-    "gemini": ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-flash-tts"],
+    "gemini": ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-flash-tts"],
     "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
     "mock": ["mock"]
 }
@@ -37,6 +37,10 @@ def validate_provider_and_model(provider_name: str, model_name: str):
 def get_provider(conversation: Conversation) -> LLMProvider:
     provider_name = conversation.ai_provider.lower()
     from app.core.config import settings
+    
+    # Transparently upgrade obsolete models for existing conversations
+    if provider_name == "gemini" and conversation.ai_model == "gemini-1.5-flash":
+        conversation.ai_model = "gemini-3.6-flash"
     
     validate_provider_and_model(provider_name, conversation.ai_model)
     

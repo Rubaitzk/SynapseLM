@@ -44,6 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = (newToken: string) => {
+    setLoading(true);
     setToken(newToken);
   };
 

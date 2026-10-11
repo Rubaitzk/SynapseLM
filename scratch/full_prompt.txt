@@ -1,0 +1,1703 @@
+<USER_REQUEST>
+# ConvergeAI  Phase 1.5
+
+## Chat-First Product Architecture, UI Refinement, Navigation & Realtime UX
+
+We are continuing Phase 1.5.
+
+The purpose of this phase is to establish the **usable intermediate product foundation** before V2.
+
+Do not begin V2 collaborative prompt editing yet.
+
+The most important product decision for this phase is:
+
+> **ConvergeAI should feel like a normal modern LLM chat application first, with collaborative/team capabilities layered on top of that experience.**
+
+It should NOT feel like a dashboard application that happens to contain a chatbot.
+
+The user should be able to enter ConvergeAI and immediately understand:
+
+```text
+New Chat
+Chats
+Teams
+Current Conversation
+AI Configuration
+```
+
+Collaboration should become visible when relevant rather than dominating the entire interface.
+
+---
+
+# 1. FIRST: STOP AND AUDIT BEFORE CHANGING THE UI
+
+Do not immediately redesign components.
+
+First inspect the current frontend and backend and determine:
+
+* why New Chat buttons currently do nothing
+* why "View All" does not correctly load the chat section
+* why login requires username/password to be entered twice
+* how routing currently works
+* how conversation creation currently works
+* how conversations are fetched
+* how teams are fetched
+* how authentication state is managed
+* whether duplicate React components/forms are being rendered
+* whether navigation is using inconsistent routes
+* whether the frontend is maintaining multiple conflicting representations of chats
+* whether the dashboard, team dashboard and conversation pages duplicate functionality
+* whether existing WebSocket lifecycle handling conflicts with route changes
+* whether conversation creation already exists in the backend but has no usable frontend entry point
+
+Do not fix these by hiding the broken buttons.
+
+Fix the underlying functionality.
+
+---
+
+# 2. PRODUCT MODEL
+
+The conceptual hierarchy should become:
+
+```text
+ConvergeAI
+
+ New Chat
+
+ Chats
+      Individual conversations
+      Team conversations
+      Recent conversations
+
+ Teams
+      Team Alpha
+            members
+            conversations
+      Team Beta
+
+ Current Conversation
+        messages
+        participants
+        realtime collaboration
+        AI configuration
+```
+
+The important principle is:
+
+> **Conversation is the primary workspace.**
+
+A team is a context in which conversations can exist.
+
+A collaboration feature is a capability of a conversation.
+
+Do not make the user think they are entering a completely separate "collaboration application."
+
+---
+
+# 3. TARGET EXPERIENCE
+
+The target interaction model should be inspired by modern LLM chat applications such as ChatGPT, Claude, Gemini, etc., without copying their branding or implementation.
+
+The design should have:
+
+* left navigation/sidebar
+* main conversation workspace
+* optional right-side contextual sidebar
+* collapsible sidebars
+* persistent new-chat action
+* recent chats
+* recent teams
+* conversation-focused main area
+* compact AI configuration control
+* clean empty state
+* responsive layout
+
+The application should feel like:
+
+```text
+             APPLICATION
+
+ Left sidebar              Main Chat           Right panel 
+                                                           
+ New Chat           Conversation              Participants
+                                               AI settings
+ Chats              Messages                              
+                                                           
+ Teams              Messages                              
+                                                           
+                    Message composer                       
+
+```
+
+Both sidebars must be collapsible.
+
+---
+
+# 4. VERY IMPORTANT: DO NOT CREATE MULTIPLE "NEW CHAT" BUTTONS
+
+There should be one clearly authoritative New Chat action.
+
+Do NOT have:
+
+```text
+Left sidebar:
+[ New Chat ]
+
+Main dashboard:
+[ New Chat ]
+
+Empty chat:
+[ New Chat ]
+
+```
+
+if all three are attempting to perform the same action.
+
+The primary New Chat action should live in the left sidebar.
+
+Other contexts may have a contextual action if genuinely useful, but do not duplicate the same control unnecessarily.
+
+If an empty conversation area needs an action, it should trigger the same underlying New Chat flow rather than implementing a second independent mechanism.
+
+---
+
+# 5. NEW CHAT MUST ACTUALLY WORK
+
+This is a current functional bug.
+
+Trace the complete flow:
+
+```text
+User clicks New Chat
+        
+Frontend action
+        
+Route/state transition
+        
+Conversation creation or draft state
+        
+Backend API if required
+        
+New conversation ID
+        
+Conversation page
+        
+Composer ready
+```
+
+Determine whether the product should:
+
+### Option A
+
+Create a conversation immediately.
+
+or
+
+### Option B
+
+Open an unsaved new-chat state and create the conversation when the first message is sent.
+
+Choose the architecture that best fits the existing backend.
+
+Do not create empty conversations unnecessarily if the existing architecture can avoid it.
+
+Whichever approach is selected, New Chat must be fully functional.
+
+Test:
+
+```text
+Click New Chat
+ new chat interface appears
+ user can type
+ user sends message
+ conversation persists
+ conversation appears in recent chats
+ conversation can be reopened
+```
+
+---
+
+# 6. CHATGPT-LIKE STARTING EXPERIENCE
+
+The main application should have a useful empty/new-chat state.
+
+When there is no active conversation:
+
+```text
+
+                                              
+              What can I help you with?       
+                                              
+                                              
+          
+       Message ConvergeAI...               
+          
+                                              
+
+```
+
+Do not make the dashboard the first thing users interact with after authentication if a chat-first experience makes more sense.
+
+The user should be able to immediately start a conversation.
+
+---
+
+# 7. LOGIN / SIGNUP EXPERIENCE
+
+The existing concept of the login page is acceptable, but correct its current behavior.
+
+Current bug:
+
+> Login/sign-up appears to require the username/password entries twice.
+
+This MUST be investigated and fixed.
+
+Do not simply hide one set of fields.
+
+Determine whether the cause is:
+
+* duplicate form rendering
+* duplicated component
+* nested form
+* authentication component rendered twice
+* React StrictMode incorrectly triggering state logic
+* route/layout duplication
+* CSS/layout duplication
+* incorrect login/signup mode rendering
+* duplicated input state
+* duplicated authentication provider
+
+Fix the root cause.
+
+Expected login:
+
+```text
+
+         Welcome back          
+                               
+ Username / Email              
+ [_________________________]   
+                               
+ Password                      
+ [_________________________]   
+                               
+          [ Log in ]           
+                               
+ Don't have an account? Sign up
+
+```
+
+There should be ONE username/email field and ONE password field.
+
+Likewise, signup should contain only the fields actually required by the backend.
+
+Do not ask the user to enter the same information twice unless it is an intentional confirmation field such as password confirmation.
+
+---
+
+# 8. AUTHENTICATION OVERLAY / CHAT-FIRST PUBLIC ENTRY
+
+Consider the following product behavior:
+
+A visitor who is not authenticated should still see the application's chat-oriented interface behind an authentication prompt.
+
+Conceptually:
+
+```text
+
+ ConvergeAI                                                  
+                                                             
+              What can I help you with?                      
+                                                             
+                                 
+                     Log in                                
+                                                           
+               username                                    
+               [______________________]                    
+               password                                    
+               [______________________]                    
+                                                           
+                      [ Log in ]                           
+                                                           
+               Don't have an account?                      
+               Sign up                                     
+                                 
+                                                             
+              Message ConvergeAI...                           
+
+```
+
+The authentication form should be a small, rounded application-level modal/card overlay.
+
+The background should communicate the actual product rather than showing a completely separate authentication universe.
+
+This does NOT mean exposing authenticated data.
+
+The underlying chat interface must remain unauthenticated-safe.
+
+Do not expose:
+
+* other users' chats
+* team information
+* private conversation history
+* participant information
+
+This is purely a product-entry experience.
+
+If implementing this requires substantial routing changes, first determine whether it is compatible with the current authentication architecture.
+
+---
+
+# 9. LEFT SIDEBAR  PRIMARY NAVIGATION
+
+The left sidebar should be the main navigation mechanism.
+
+Target:
+
+```text
+
+ ConvergeAI            
+                       
+ + New Chat            
+                       
+  Teams               
+   Team Alpha          
+   Team Beta           
+   Team Gamma          
+                       
+  Chats               
+   Architecture        
+   ML discussion       
+   FastAPI debugging   
+   Project planning    
+                       
+                       
+ Settings              
+ Account               
+
+```
+
+The exact ordering can be adjusted for usability.
+
+---
+
+# 10. TEAMS COLLAPSIBLE SECTION
+
+Teams should behave as a collapsible navigation section.
+
+Initially:
+
+```text
+ Teams
+```
+
+Clicking the arrow:
+
+```text
+ Teams
+
+    Team Alpha
+    Team Beta
+    Team Gamma
+```
+
+Only recent teams need to appear in the expanded navigation area.
+
+Do not make the sidebar infinitely long.
+
+If there are many teams, show a limited recent list and provide:
+
+```text
+View all teams
+```
+
+The arrow should only control expansion/collapse.
+
+Clicking the **Teams section itself** should navigate to a dedicated Teams overview page.
+
+Therefore:
+
+```text
+Click arrow
+     expand/collapse recent teams
+
+Click "Teams"
+     open Teams page
+```
+
+Do not make these actions conflict.
+
+---
+
+# 11. TEAMS OVERVIEW PAGE
+
+Clicking Teams should open a dedicated overview.
+
+It should not simply expand the sidebar.
+
+The page should provide a visually organized overview of the user's teams.
+
+Conceptually:
+
+```text
+Teams
+
+Your teams
+
+
+ Team Alpha              
+ 5 members               
+ 4 conversations         
+                         
+ Recent                  
+ Architecture discussion
+ API planning            
+                         
+ View team              
+
+
+
+ Team Beta               
+ 3 members               
+ 2 conversations         
+                         
+ Recent                  
+ ML project              
+                         
+ View team              
+
+
+[ + Create Team ]
+```
+
+Use a clean card/list arrangement.
+
+Do not create three giant dashboard tiles merely because there are three team functions.
+
+The page should help the user understand:
+
+* what teams they belong to
+* recent activity
+* number of members
+* recent conversations
+* how to enter a team
+* how to create a team
+
+---
+
+# 12. CHAT COLLAPSIBLE SECTION
+
+Chats should behave the same way.
+
+Collapsed:
+
+```text
+ Chats
+```
+
+Expanded:
+
+```text
+ Chats
+
+    Architecture discussion
+    FastAPI debugging
+    ML experiment
+    Project planning
+```
+
+Show a reasonable number of recent conversations.
+
+Do not attempt to display every conversation in the sidebar.
+
+Provide:
+
+```text
+View all chats
+```
+
+when appropriate.
+
+---
+
+# 13. CHAT SECTION CONTENT
+
+The recent chat list can contain:
+
+* individual conversations
+* team conversations
+* conversations with multiple participants
+
+Do not split the sidebar into separate "Individual Chats" and "Team Chats" unless real user testing later demonstrates that this is necessary.
+
+For now, conversations are the primary object.
+
+Where useful, visually indicate team context:
+
+```text
+Architecture discussion
+Team Alpha  4 participants
+```
+
+or:
+
+```text
+ML Experiment
+You  private
+```
+
+This makes the distinction understandable without fragmenting the navigation.
+
+---
+
+# 14. VIEW ALL CHATS  CURRENT BUG
+
+There is currently a problem where clicking "View All" does not correctly load the chat section.
+
+This must be fixed before considering the UI complete.
+
+Trace:
+
+```text
+View all
+    
+route
+    
+component
+    
+API request
+    
+response
+    
+state
+    
+render
+```
+
+Determine exactly where the failure occurs.
+
+Do not simply change the button's appearance.
+
+The final behavior should be:
+
+```text
+Click View All
+    
+Dedicated Chats page opens
+    
+All authorized conversations load
+    
+Conversations are grouped/sorted appropriately
+    
+Click conversation
+    
+Conversation opens in main chat workspace
+```
+
+The page must have proper loading, empty, error, and pagination/infinite-scroll behavior if the existing dataset architecture requires it.
+
+---
+
+# 15. CHATS OVERVIEW PAGE
+
+Create a proper dedicated Chats page.
+
+Conceptually:
+
+```text
+Chats
+
+[ Search conversations... ]
+
+Recent
+
+
+ Architecture Discussion                  Today 10:32 PM   
+ Team Alpha  3 participants                              
+ Dependency injection and service design...               
+
+
+
+ FastAPI Debugging                         Yesterday       
+ Private                                                   
+ WebSocket connection issue...                             
+
+
+
+ ML Experiment                             Sep 30          
+ Team Beta  4 participants                               
+
+```
+
+Do not make every conversation a giant card.
+
+A compact list is more appropriate for a chat-history interface.
+
+---
+
+# 16. MAIN CHAT AREA
+
+When a conversation is selected, the main area should remain focused on the conversation.
+
+Target:
+
+```text
+
+         Architecture Discussion         3 online    AI    
+
+                                                               
+ Alice                                                          
+ Explain dependency injection...                                
+                                                               
+ Bob                                                            
+ How does this compare to service locator?                     
+                                                               
+ AI                                                             
+ Dependency injection provides...                               
+                                                               
+                                                               
+
+ Message ConvergeAI...                                 [Send]  
+
+```
+
+The chat should occupy the majority of the viewport.
+
+---
+
+# 17. RIGHT SIDEBAR
+
+The right sidebar is contextual.
+
+It should contain information relevant to the current conversation:
+
+```text
+Participants
+
+Alice       Owner
+Bob         Member
+Charlie     Member
+
+
+
+Add member
+
+[ Select user ]
+[ Add ]
+
+
+
+AI Configuration
+```
+
+Destructive conversation controls may appear lower down or in a danger zone.
+
+Do not make the right sidebar mandatory for every screen.
+
+It should only appear where contextual information is useful.
+
+---
+
+# 18. COLLAPSIBLE RIGHT SIDEBAR
+
+The right sidebar must be collapsible.
+
+Example:
+
+```text
+Chat only:
+
+
+ Chat                                         
+                                              
+ Messages                                     
+                                              
+
+```
+
+Open:
+
+```text
+
+ Chat                              Details   
+                                             
+ Messages                          Members   
+                                   AI        
+
+```
+
+When the sidebar opens, the main chat area must automatically resize.
+
+When it closes, the main chat area must expand.
+
+Do not overlay the sidebar on top of the composer or important content on desktop unless that is intentionally implemented for narrow screens.
+
+---
+
+# 19. LEFT SIDEBAR COLLAPSING
+
+The left sidebar should also be collapsible.
+
+Collapsed:
+
+```text
+
+   
+ +  
+  
+  
+   
+
+```
+
+Expanded:
+
+```text
+
+ ConvergeAI       
+                  
+ + New Chat       
+                  
+ Teams            
+ Chats            
+                  
+ Settings         
+
+```
+
+Do not rely on literal emoji icons unless the existing icon system requires it.
+
+Use the project's icon system or a consistent icon library.
+
+The collapsed sidebar should still allow access to the most important navigation.
+
+---
+
+# 20. RESPONSIVE SIDEBAR BEHAVIOR
+
+On smaller screens:
+
+* left sidebar can become a drawer
+* right sidebar can become a drawer
+* main chat remains the focus
+* composer remains usable
+
+Do not simply shrink the desktop layout until everything becomes unreadable.
+
+---
+
+# 21. SIDEBAR STATE
+
+Determine whether sidebar open/closed state should persist locally.
+
+A reasonable implementation is:
+
+```text
+local UI preference
+    
+localStorage or equivalent
+```
+
+Do not store sidebar UI state in the database.
+
+---
+
+# 22. AI SETTINGS
+
+The AI settings control belongs naturally in the upper conversation header.
+
+Example:
+
+```text
+Architecture Discussion        Connected       AI: Gemini 
+```
+
+However, recognize that **provider/model management is not yet fully implemented**.
+
+Do not create fake configuration functionality.
+
+The UI architecture should leave room for:
+
+```text
+AI Settings
+    
+Provider
+    
+Models
+    
+Credentials/API configuration
+    
+Execution target
+```
+
+but only expose controls that are actually supported.
+
+---
+
+# 23. FUTURE API / MODEL MANAGEMENT
+
+We will eventually need functionality such as:
+
+```text
+Settings
+  AI Providers
+       Gemini
+           API configuration
+       OpenAI
+           API configuration
+       Local LLM
+            Runtime configuration
+```
+
+and:
+
+```text
+Model configuration
+Provider
+Model
+Credentials
+Execution target
+Capabilities
+```
+
+Do NOT build the entire provider-management product in this UI phase unless the backend architecture is already ready.
+
+But make sure the UI architecture does not make it difficult to add later.
+
+Do not hard-code:
+
+```text
+AI = Gemini forever
+```
+
+into the component structure.
+
+---
+
+# 24. CONVERSATION AI CONFIGURATION
+
+Conversation configuration should eventually follow:
+
+```text
+Conversation
+      
+AI Configuration
+      
+Provider
+Model
+Execution Target
+```
+
+not:
+
+```text
+User clicked send
+      
+whatever model this user currently has
+```
+
+The conversation should have a coherent AI configuration for collaborative use.
+
+---
+
+# 25. REALTIME LIFECYCLE EVENTS
+
+The WebSocket is not only for chat messages.
+
+It should function as the application's realtime event channel.
+
+Conceptually:
+
+```text
+WebSocket
+
+ Message events
+ Typing events
+ Presence events
+ AI streaming events
+
+ Lifecycle events
+       Access revoked
+       Conversation deleted
+       Membership changed
+       Team access revoked
+       AI configuration changed
+       Connection/system state
+```
+
+Do not introduce polling for these if WebSockets are already available.
+
+Polling is:
+
+```text
+client repeatedly asks:
+"Did anything change?"
+```
+
+The desired architecture is:
+
+```text
+server detects change
+        
+server immediately sends event
+        
+client reacts
+```
+
+---
+
+# 26. ACCESS REVOCATION  EXACT UX
+
+Scenario:
+
+Bob has the conversation open.
+
+Alice removes Bob.
+
+Expected:
+
+```text
+Alice
+ 
+Backend transaction
+ 
+membership removed
+ 
+server sends access-revocation event
+ 
+Bob's frontend receives event
+ 
+Bob is informed immediately
+ 
+Bob is redirected
+```
+
+Bob should see an in-app notification:
+
+```text
+Conversation access removed
+
+You no longer have access to this conversation.
+```
+
+Then redirect to:
+
+```text
+What can I help you with?
+```
+
+or the main new-chat state.
+
+The redirect must happen automatically.
+
+Bob must not remain in the inaccessible conversation.
+
+---
+
+# 27. CONVERSATION DELETED WHILE OPEN
+
+Scenario:
+
+Bob is inside Conversation A.
+
+Alice deletes Conversation A.
+
+Expected:
+
+```text
+Conversation deleted
+
+This conversation is no longer available.
+```
+
+Then:
+
+```text
+What can I help you with?
+```
+
+The frontend must:
+
+* close the WebSocket
+* stop accepting events
+* clear conversation state
+* remove it from recent chats
+* navigate away
+* prevent sending further messages
+* avoid reconnecting to the deleted conversation
+
+---
+
+# 28. DIRECTLY OPENING A DELETED/UNAUTHORIZED CONVERSATION
+
+If the user navigates directly to an unavailable conversation URL:
+
+Do not show:
+
+```text
+404
+AxiosError
+403 Forbidden
+Internal Server Error
+```
+
+Create a proper application-level state:
+
+```text
+Conversation unavailable
+
+This conversation may have been deleted or you may no longer have access to it.
+
+[ Start a new chat ]
+[ Back to chats ]
+```
+
+Do not leak information about resources the user is not authorized to know about.
+
+---
+
+# 29. APPLICATION-LEVEL NOTIFICATIONS
+
+Do not use:
+
+```javascript
+alert()
+confirm()
+```
+
+for normal application events.
+
+Implement reusable application-level:
+
+* toast
+* modal
+* banner
+* inline error
+* success notification
+* warning notification
+
+These should use the ConvergeAI design language.
+
+Examples:
+
+```text
+Conversation deleted
+Access removed
+Message failed to send
+Reconnecting...
+AI generation failed
+Conversation unavailable
+```
+
+---
+
+# 30. REALTIME EVENT ORDER
+
+Persistent operations must happen first.
+
+Correct:
+
+```text
+User action
+    
+Authentication
+    
+Authorization
+    
+Database transaction
+    
+Commit
+    
+WebSocket event
+    
+UI update
+```
+
+Do not tell the frontend that something happened before the database confirms it.
+
+---
+
+# 31. SYSTEM EVENTS ARE NOT CHAT MESSAGES
+
+Do not insert lifecycle events into normal conversation history unless explicitly required.
+
+For example:
+
+```text
+"Bob has been removed"
+```
+
+should be an application notification/event.
+
+It should not automatically become a permanent message authored by "System".
+
+Keep:
+
+```text
+persistent conversation messages
+```
+
+separate from:
+
+```text
+ephemeral/application lifecycle events
+```
+
+---
+
+# 32. DELETE CONVERSATION
+
+Conversation deletion must have:
+
+* permission check
+* confirmation modal
+* backend deletion
+* database integrity
+* WebSocket event
+* frontend cleanup
+* sidebar cleanup
+* route cleanup
+
+Confirmation:
+
+```text
+Delete conversation?
+
+This will permanently delete this conversation and its messages.
+
+[Cancel]    [Delete conversation]
+```
+
+No browser confirm dialog.
+
+---
+
+# 33. REMOVE PARTICIPANT
+
+Participant removal must have:
+
+* permission check
+* confirmation
+* database update
+* realtime event
+* active WebSocket invalidation
+* frontend redirect for removed user
+* participant list update for remaining users
+
+Confirmation:
+
+```text
+Remove Bob?
+
+Bob will immediately lose access to this conversation.
+
+[Cancel]    [Remove member]
+```
+
+---
+
+# 34. VISUAL STYLE  INTERMEDIATE DESIGN
+
+Use the current blue identity but make it mature.
+
+The intended visual character is:
+
+```text
+Clean
+Modern
+Minimal
+Professional
+Chat-first
+Neutral surfaces
+Blue accents
+Clear hierarchy
+Subtle borders
+Moderate corner radius
+Compact controls
+```
+
+Avoid:
+
+```text
+AI dashboard aesthetic
+Excessive gradients
+Huge cards
+Excessive shadows
+Glowing elements
+Unnecessary animations
+Fake metrics
+Decorative illustrations everywhere
+Excessive empty space
+```
+
+This is NOT the final design language.
+
+This is the stable intermediate design that will later be refined once the product reaches its final feature set.
+
+---
+
+# 35. COMPONENT CONSISTENCY
+
+Create/reuse shared components for:
+
+* Button
+* Input
+* Select
+* Dialog
+* Toast
+* Sidebar
+* Avatar
+* Badge
+* Card
+* Empty state
+* Loading state
+* Error state
+* Conversation list item
+* Participant item
+
+Do not independently style the same control differently on five pages.
+
+---
+
+# 36. DO NOT MAKE THE APPLICATION "AI SLOP"
+
+Do not interpret "modern AI UI" as:
+
+```text
+gradient background
+glass cards
+huge rounded rectangles
+glowing blue/purple buttons
+giant AI logo
+floating statistics
+```
+
+The desired reference category is:
+
+> **A clean productivity/chat application similar in information architecture to established LLM chat products.**
+
+The goal is usability, not visual novelty.
+
+---
+
+# 37. FUNCTIONAL REGRESSION
+
+After the redesign, verify:
+
+### Authentication
+
+* login
+* signup
+* logout
+* no duplicate credential fields
+
+### Navigation
+
+* New Chat
+* Chats
+* View All Chats
+* Teams
+* View Team
+* Back navigation
+* Sidebar collapse
+* Sidebar expansion
+
+### Conversations
+
+* create
+* open
+* send
+* receive
+* reload
+* reconnect
+* delete
+
+### Collaboration
+
+* add member
+* remove member
+* realtime participant updates
+* realtime access revocation
+* typing
+* presence
+
+### AI
+
+* model selection if supported
+* generation
+* streaming
+* failure handling
+
+---
+
+# 38. ACCEPTANCE TEST  NORMAL USER FLOW
+
+Test the application from a fresh login.
+
+### Step 1
+
+Login.
+
+Expected:
+
+```text
+Main chat/new-chat experience
+```
+
+not a confusing dashboard.
+
+### Step 2
+
+Click:
+
+```text
++ New Chat
+```
+
+Expected:
+
+```text
+New conversation opens.
+```
+
+### Step 3
+
+Send:
+
+```text
+Hello
+```
+
+Expected:
+
+```text
+Conversation persists.
+AI responds.
+Conversation appears in Chats.
+```
+
+### Step 4
+
+Collapse the left sidebar.
+
+Expected:
+
+```text
+Main chat expands.
+```
+
+### Step 5
+
+Open the sidebar.
+
+Expected:
+
+```text
+Recent teams/chats visible.
+```
+
+### Step 6
+
+Expand Teams.
+
+Expected:
+
+```text
+Recent teams appear.
+```
+
+### Step 7
+
+Click Teams.
+
+Expected:
+
+```text
+Teams overview page.
+```
+
+### Step 8
+
+Return to Chats.
+
+Expected:
+
+```text
+Chats overview loads correctly.
+```
+
+### Step 9
+
+Click a conversation.
+
+Expected:
+
+```text
+Conversation opens.
+```
+
+### Step 10
+
+Open right sidebar.
+
+Expected:
+
+```text
+Participants/settings appear.
+Main chat resizes correctly.
+```
+
+### Step 11
+
+Close right sidebar.
+
+Expected:
+
+```text
+Main chat expands.
+```
+
+---
+
+# 39. ACCEPTANCE TEST  COLLABORATIVE REMOVAL
+
+Use:
+
+```text
+Alice
+Bob
+Charlie
+```
+
+in one conversation.
+
+Bob keeps the conversation open.
+
+Alice removes Bob.
+
+Expected:
+
+```text
+Bob immediately receives realtime event.
+
+Bob sees:
+"Conversation access removed."
+
+Bob is redirected to:
+"What can I help you with?"
+
+Bob cannot send messages.
+
+Bob cannot reconnect to the conversation.
+
+Alice and Charlie remain in the conversation.
+
+Their participant list updates.
+```
+
+---
+
+# 40. ACCEPTANCE TEST  DELETION
+
+Bob is inside a conversation.
+
+Alice deletes it.
+
+Expected:
+
+```text
+Bob receives realtime event.
+
+Bob sees:
+"Conversation deleted."
+
+Bob is redirected.
+
+The conversation disappears from chat lists.
+
+Direct URL no longer loads the conversation.
+
+No stale WebSocket reconnect occurs.
+```
+
+---
+
+# 41. ACCEPTANCE TEST  MULTIPLE USERS
+
+Test:
+
+```text
+Alice
+Bob
+Charlie
+```
+
+All connected.
+
+Verify:
+
+* messages appear once
+* typing works
+* presence works
+* AI streaming reaches all authorized users
+* removal is realtime
+* deletion is realtime
+* sidebar updates
+* conversation state remains consistent
+
+---
+
+# 42. IMPORTANT IMPLEMENTATION RULE
+
+Do not solve UI problems by creating more pages.
+
+The goal is actually to reduce unnecessary navigation.
+
+The primary experience should be:
+
+```text
+Login
+   
+Main Chat
+   
+New Chat / Existing Chat
+```
+
+with:
+
+```text
+Teams
+Chats
+Settings
+```
+
+available through navigation.
+
+Teams and dashboards are secondary organizational views.
+
+The conversation is the central workspace.
+
+---
+
+# 43. IMPORTANT IMPLEMENTATION RULE
+
+Do not duplicate data or functionality unnecessarily.
+
+There should be one authoritative implementation for:
+
+```text
+New Chat
+Conversation creation
+Conversation fetching
+Conversation opening
+Team fetching
+Authentication
+AI configuration
+WebSocket connection
+```
+
+Multiple UI buttons may invoke the same action, but they should not each implement separate logic.
+
+---
+
+# 44. ARCHITECTURAL TARGET
+
+After this phase:
+
+```text
+                    ConvergeAI
+                        
+              
+                                 
+          Navigation          Conversation
+                                 
+               
+                                    
+      Chats       Teams   Messages    AI
+                                      
+                         Realtime   Provider
+                                   Orchestrator
+                                      
+                         WebSocket      Gemini
+                                       Local
+                                       Future
+```
+
+The frontend should reflect this architecture rather than fighting it.
+
+---
+
+# 45. DO NOT IMPLEMENT V2 YET
+
+Do NOT implement:
+
+* shared live prompt editing
+* collaborative drafts
+* suggestions
+* append suggestions
+* accept/reject workflow
+* CRDT
+* collaborative cursor positions
+* advanced collaborative editing
+
+The purpose of this phase is to make the normal chat + collaboration foundation excellent enough that these features can later be added naturally.
+
+---
+
+# 46. FINAL COMPLETION CRITERIA
+
+Phase 1.5 UI work is NOT complete if:
+
+* only the dashboard looks better
+* New Chat still does nothing
+* View All Chats still fails
+* login still renders duplicate fields
+* navigation is inconsistent
+* sidebars cannot collapse
+* chat does not resize correctly
+* browser alerts are used
+* deleted conversations remain open
+* removed users remain inside conversations
+* WebSocket events are not used for lifecycle changes
+* raw API errors are shown to users
+* AI configuration is hard-coded into UI
+* teams and chats remain unnecessarily duplicated
+
+Phase 1.5 IS complete when:
+
+> The application feels like a coherent, modern LLM chat application with collaboration built into it.
+
+---
+
+# 47. FINAL REPORT
+
+Report:
+
+1. root cause of duplicate login fields
+2. root cause of broken New Chat
+3. root cause of broken View All Chats
+4. navigation architecture after changes
+5. sidebar architecture
+6. responsive behavior
+7. pages redesigned
+8. components created/reused
+9. conversation lifecycle
+10. participant removal
+11. realtime lifecycle events
+12. deleted conversation handling
+13. access-revocation handling
+14. application-level notification system
+15. AI configuration integration
+16. remaining provider/API configuration work
+17. tests performed
+18. known limitations
+19. explicit V2 boundary
+
+Do not report visual work as complete merely because the dashboard changed.
+
+The entire user journey must now belong to the same product.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-10-08T18:24:59+05:00.
+</ADDITIONAL_METADATA>

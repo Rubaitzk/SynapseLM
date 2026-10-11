@@ -25,7 +25,7 @@ def upgrade() -> None:
     executiontarget_enum.create(op.get_bind(), checkfirst=True)
     
     op.add_column('conversations', sa.Column('ai_provider', sa.String(), server_default='gemini', nullable=False))
-    op.add_column('conversations', sa.Column('ai_model', sa.String(), server_default='gemini-1.5-flash', nullable=False))
+    op.add_column('conversations', sa.Column('ai_model', sa.String(), server_default='gemini-3.6-flash', nullable=False))
     op.add_column('conversations', sa.Column('ai_execution_target', executiontarget_enum, server_default='hosted', nullable=False))
     op.add_column('conversations', sa.Column('ai_system_instructions', sa.Text(), nullable=True))
     op.add_column('conversations', sa.Column('ai_temperature', sa.Float(), server_default='0.7', nullable=False))

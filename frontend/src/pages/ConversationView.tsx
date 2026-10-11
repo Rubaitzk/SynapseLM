@@ -31,6 +31,7 @@ export default function ConversationView() {
   const [conversation, setConversation] = useState<any>(null);
 
   const [participants, setParticipants] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
 
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
@@ -97,7 +98,7 @@ export default function ConversationView() {
 
         ai_provider: res.data.ai_provider || 'gemini',
 
-        ai_model: res.data.ai_model || 'gemini-1.5-flash',
+        ai_model: res.data.ai_model || 'gemini-3.6-flash',
 
         ai_execution_target: res.data.ai_execution_target || 'hosted',
 
@@ -131,6 +132,16 @@ export default function ConversationView() {
   };
 
 
+
+  
+  const fetchRequests = async () => {
+    try {
+      const res = await api.get(`/conversations/${id}/requests`);
+      setRequests(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const fetchParticipants = async () => {
 
@@ -247,9 +258,13 @@ export default function ConversationView() {
       
 
       ws.current.onopen = () => {
+        
 
         setConnectionStatus('connected');
 
+      
+        fetchPresence();
+        fetchMessages();
       };
 
 
@@ -288,7 +303,12 @@ export default function ConversationView() {
 
             });
 
-          } else if (data.event === 'message.created') {
+                      } else if (data.event === 'participant.added') {
+              fetchParticipants();
+            } else if (data.event === 'request.created' || data.event === 'request.accepted' || data.event === 'request.rejected' || data.event === 'request.cancelled') {
+              fetchRequests();
+              if (data.event === 'request.accepted') fetchParticipants();
+            } else if (data.event === 'message.created') {
 
              setMessages(prev => {
 
@@ -397,21 +417,12 @@ export default function ConversationView() {
       
 
       ws.current.onclose = () => {
-
         if (isRevokedRef.current) return;
-
         setConnectionStatus('reconnecting');
-
+        if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
-
-           fetchPresence();
-
-           fetchMessages();
-
            connectWs();
-
         }, 3000);
-
       };
 
     };
@@ -438,7 +449,7 @@ export default function ConversationView() {
 
     };
 
-  }, [id, navigate, addToast]);
+  }, [id]);
 
 
 
@@ -551,6 +562,18 @@ export default function ConversationView() {
   };
 
 
+
+  
+  const handleRequestAction = async (reqId: string, action: 'accept' | 'reject') => {
+    try {
+      await api.post(`/conversations/${id}/requests/${reqId}/${action}`);
+      addToast(`Request ${action}ed`, 'success');
+      fetchRequests();
+      if (action === 'accept') fetchParticipants();
+    } catch (err: any) {
+      addToast(err.response?.data?.detail || `Failed to ${action} request`, 'error');
+    }
+  };
 
   const handleAddParticipant = async (e: React.FormEvent) => {
 
@@ -917,6 +940,27 @@ export default function ConversationView() {
           </div>
 
           
+
+          
+          {requests.length > 0 && (
+          <div className="p-4 border-b border-gray-200 bg-amber-50">
+            <h3 className="font-semibold text-gray-900 flex items-center mb-3 text-sm">
+              <Users size={16} className="mr-2 text-amber-600" />
+              Pending Requests ({requests.length})
+            </h3>
+            <div className="space-y-3">
+              {requests.map(req => (
+                <div key={req.id} className="text-sm border border-amber-200 bg-white p-2 rounded">
+                  <div className="font-medium truncate mb-1">{req.requester?.username || req.requester_id}</div>
+                  <div className="flex gap-2">
+                    <Button size="sm" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'accept')}>Accept</Button>
+                    <Button size="sm" variant="ghost" className="flex-1 py-1 h-auto text-xs" onClick={() => handleRequestAction(req.id, 'reject')}>Reject</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
 

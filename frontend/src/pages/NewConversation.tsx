@@ -50,7 +50,11 @@ export default function NewConversation() {
       // 3. Navigate to it
       navigate(`/conversations/${convId}`);
     } catch (err: any) {
-      addToast(err.response?.data?.detail || 'Failed to start conversation.', 'error');
+      if (err.response?.data?.error_code === 'provider_configuration_missing') {
+        addToast("Backend provider configuration missing. Check environment variables.", "error");
+      } else {
+        addToast(err.response?.data?.detail || 'Failed to start conversation.', 'error');
+      }
       setIsSubmitting(false);
     }
   };

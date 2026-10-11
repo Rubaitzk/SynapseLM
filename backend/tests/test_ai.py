@@ -18,7 +18,10 @@ def test_mock_provider():
     assert "[MOCK]" in response
     assert "Hello AI" in response
 
-def test_ai_message_flow(client):
+def test_ai_message_flow(client, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, 'LLM_PROVIDER', 'mock')
+    monkeypatch.setattr(settings, 'LLM_MODEL', 'mock')
     import uuid
     uid = uuid.uuid4().hex[:8]
     email = f"ai_user_{uid}@example.com"
