@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.6-flash")
+    
+    # Credential Encryption
+    CREDENTIAL_ENCRYPTION_KEY: str | None = os.getenv("CREDENTIAL_ENCRYPTION_KEY", None)
 
     class Config:
         case_sensitive = True

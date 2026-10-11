@@ -516,8 +516,12 @@ export default function ConversationView() {
 
     } catch (err: any) {
 
-      addToast(err.response?.data?.detail || "Failed to send message", "error");
-
+      const data = err.response?.data;
+      if (data?.error_code === "provider_configuration_missing" || data?.error_code === "unsupported_provider") {
+        addToast(`${data.detail} Please configure your API key in Settings.`, "error");
+      } else {
+        addToast(data?.detail || "Failed to send message", "error");
+      }
       setContent(payload); // restore content
 
     }

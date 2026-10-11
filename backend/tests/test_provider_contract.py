@@ -98,33 +98,3 @@ def test_create_conversation_default_model_resolution(client, monkeypatch):
     assert data["ai_provider"] == "gemini"
     assert data["ai_model"] == "gemini-3.6-flash"
 
-def test_send_message_obsolete_model_upgrade(client, monkeypatch):
-    monkeypatch.setattr(settings, "LLM_API_KEY", "fake-key")
-    h = get_auth_headers(client)
-    
-    res = client.post("/api/conversations/", json={
-        "title": "Obsolete Model Test",
-        "ai_provider": "gemini",
-        "ai_model": "gemini-3.6-flash" # Create with valid model first
-    }, headers=h)
-    assert res.status_code == 201, res.text
-    conv_id = res.json()["id"]
-    
-    # We mock get_conversation to return a conversation with an obsolete model
-    import app.crud.crud_conversation as crud_conv
-    original_get = crud_conv.get_conversation
-    
-    def mock_get_conversation(db, cid, **kwargs):
-        conv = original_get(db, cid, **kwargs)
-        if conv and cid == conv_id:
-            conv.ai_model = "gemini-1.5-flash"
-        return conv
-        
-    monkeypatch.setattr(crud_conv, "get_conversation", mock_get_conversation)
-    
-    # Now send a message, it should succeed by auto-upgrading in memory
-    res_msg = client.post(f"/api/conversations/{conv_id}/messages", json={
-        "content": "Hello obsolete model"
-    }, headers=h)
-    
-    assert res_msg.status_code == 200, res_msg.text

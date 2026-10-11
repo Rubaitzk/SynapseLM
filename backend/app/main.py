@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import auth, teams, invitations, conversations, websockets, shares, requests
+from app.api.endpoints import credentials
 import asyncio
 from contextlib import asynccontextmanager
 from app.core.realtime import manager
@@ -40,6 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(credentials.router, prefix="/api/credentials", tags=["credentials"])
 app.include_router(teams.router, prefix="/api/teams", tags=["teams"])
 app.include_router(invitations.router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])

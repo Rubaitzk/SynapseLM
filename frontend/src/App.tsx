@@ -9,6 +9,7 @@ import TeamDetails from './pages/TeamDetails';
 import Invitations from './pages/Invitations';
 import ConversationView from './pages/ConversationView';
 import ShareAccept from './pages/ShareAccept';
+import Settings from './pages/Settings';
 
 import { ToastProvider } from './context/ToastContext';
 
@@ -36,6 +37,7 @@ function App() {
             <Route path="/conversations/:id" element={<ProtectedRoute><ConversationView /></ProtectedRoute>} />
             <Route path="/shares/:token" element={<ProtectedRoute><ShareAccept /></ProtectedRoute>} />
             <Route path="/invitations" element={<ProtectedRoute><Invitations /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           </Routes>
         </Router>
       </ToastProvider>

@@ -34,28 +34,29 @@ def validate_provider_and_model(provider_name: str, model_name: str):
             status_code=400
         )
 
-def get_provider(conversation: Conversation) -> LLMProvider:
+def get_provider(db: Session, conversation: Conversation, user_id: str) -> LLMProvider:
     provider_name = conversation.ai_provider.lower()
     from app.core.config import settings
-    
-    # Transparently upgrade obsolete models for existing conversations
-    if provider_name == "gemini" and conversation.ai_model == "gemini-1.5-flash":
-        conversation.ai_model = "gemini-3.6-flash"
+    from app.crud.crud_credential import get_decrypted_credential
     
     validate_provider_and_model(provider_name, conversation.ai_model)
     
+    if provider_name == "mock":
+        return MockProvider()
+        
+    api_key = get_decrypted_credential(db, user_id, provider_name)
+    if not api_key:
+        api_key = settings.LLM_API_KEY
+        
+    if not api_key:
+        raise ProviderConfigurationError(provider_name, f"{provider_name.capitalize()} API key is required but not configured.")
+        
     if provider_name == "gemini":
         from app.services.llm.gemini_provider import GeminiProvider
-        if not settings.LLM_API_KEY:
-            raise ProviderConfigurationError("gemini", "Gemini API key is required but not configured.")
-        return GeminiProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
+        return GeminiProvider(api_key=api_key, model=conversation.ai_model)
     elif provider_name == "openai":
         from app.services.llm.openai_provider import OpenAIProvider
-        if not settings.LLM_API_KEY:
-            raise ProviderConfigurationError("openai", "OpenAI API key is required but not configured.")
-        return OpenAIProvider(api_key=settings.LLM_API_KEY, model=conversation.ai_model)
-    elif provider_name == "mock":
-        return MockProvider()
+        return OpenAIProvider(api_key=api_key, model=conversation.ai_model)
     else:
         raise ProviderConfigurationError(
             provider=provider_name,
@@ -64,7 +65,7 @@ def get_provider(conversation: Conversation) -> LLMProvider:
             status_code=400
         )
 
-async def generate_assistant_response(db: Session, conversation_id: str) -> Optional[str]:
+async def generate_assistant_response(db: Session, conversation_id: str, user_id: str) -> Optional[str]:
     """
     Orchestrates building the context, calling the provider, and persisting the response.
     Returns the generated content.
@@ -82,7 +83,7 @@ async def generate_assistant_response(db: Session, conversation_id: str) -> Opti
     messages = build_message_history(db, conversation_id)
     
     # 2. Get provider
-    provider = get_provider(conversation)
+    provider = get_provider(db, conversation, user_id)
     
     response_id = str(uuid.uuid4())
     

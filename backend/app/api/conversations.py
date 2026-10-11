@@ -42,7 +42,7 @@ def create_conversation(
     
     # Validate provider configuration synchronously
     from app.services.llm.orchestrator import get_provider
-    get_provider(conv)
+    get_provider(db, conv, current_user.id)
     
     return conv
 
@@ -224,11 +224,11 @@ async def send_message(
     
     # 1.6 Synchronously validate provider before sending to background
     from app.services.llm.orchestrator import get_provider
-    get_provider(conv)
+    get_provider(db, conv, current_user.id)
 
     # 2. Trigger AI orchestrator in background
     from app.services.llm.orchestrator import generate_assistant_response
-    background_tasks.add_task(generate_assistant_response, db, conversation_id)
+    background_tasks.add_task(generate_assistant_response, db, conversation_id, current_user.id)
     
     return user_msg
 
