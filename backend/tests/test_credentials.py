@@ -68,3 +68,63 @@ def test_deleted_credential_is_not_reused(client, monkeypatch):
     res = client.get("/api/credentials/", headers=h)
     gemini_cred = next(c for c in res.json() if c["provider_name"] == "gemini")
     assert gemini_cred["is_configured"] is False
+
+def test_shared_conversation_uses_sender_credential(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", "system-key")
+    monkeypatch.setattr("app.api.endpoints.credentials.validate_provider_key", dummy_validate_provider_key)
+    monkeypatch.setattr(settings, 'CREDENTIAL_ENCRYPTION_KEY', mock_key)
+
+    # 1. Register Alice and Bob
+    client.post("/api/auth/register", json={"email": "alice_shared@ex.com", "username": "alice_sh", "password": "pw"})
+    token_alice = client.post("/api/auth/login", data={"username": "alice_shared@ex.com", "password": "pw"}).json()["access_token"]
+    h_alice = {"Authorization": f"Bearer {token_alice}"}
+
+    client.post("/api/auth/register", json={"email": "bob_shared@ex.com", "username": "bob_sh", "password": "pw"})
+    token_bob = client.post("/api/auth/login", data={"username": "bob_shared@ex.com", "password": "pw"}).json()["access_token"]
+    h_bob = {"Authorization": f"Bearer {token_bob}"}
+
+    # 2. Set distinct personal credentials
+    client.post("/api/credentials/", json={"provider_name": "gemini", "api_key": "ALICE_KEY"}, headers=h_alice)
+    client.post("/api/credentials/", json={"provider_name": "gemini", "api_key": "BOB_KEY"}, headers=h_bob)
+
+    # 3. Alice creates conversation and share link
+    resp = client.post("/api/conversations/", headers=h_alice, json={
+        "title": "Shared Chat",
+        "ai_provider": "gemini",
+        "ai_model": "gemini-3.6-flash",
+        "ai_execution_target": "hosted",
+        "ai_temperature": 0.7
+    })
+    conv_id = resp.json()["id"]
+
+    resp = client.post(f"/api/conversations/{conv_id}/shares", headers=h_alice, json={})
+    share_token = resp.json()["share_token"]
+
+    # 4. Bob previews share, branches, requests access, Alice accepts
+    resp = client.post(f"/api/shares/{share_token}/branches", headers=h_bob)
+    branch_id = resp.json()["id"]
+
+    resp = client.post(f"/api/shares/{share_token}/requests", headers=h_bob, json={"branch_conversation_id": branch_id})
+    req_id = resp.json()["id"]
+
+    client.post(f"/api/conversations/{conv_id}/requests/{req_id}/accept", headers=h_alice)
+
+    # 5. Intercept Provider initialization to check which key is used
+    recorded_keys = []
+    class DummyGeminiProvider:
+        def __init__(self, api_key, model):
+            recorded_keys.append(api_key)
+        def generate_response(self, *args, **kwargs):
+            return "dummy"
+
+    monkeypatch.setattr("app.services.llm.gemini_provider.GeminiProvider", DummyGeminiProvider)
+
+    # 6. Bob sends a message to Alice's conversation
+    # The synchronous get_provider check should capture Bob's key
+    resp = client.post(f"/api/conversations/{conv_id}/messages", headers=h_bob, json={"content": "Hi Alice"})
+    assert resp.status_code == 200
+
+    # The background task might also run DummyGeminiProvider, but both should use BOB_KEY
+    assert "BOB_KEY" in recorded_keys
+    assert "ALICE_KEY" not in recorded_keys
+    assert "system-key" not in recorded_keys
