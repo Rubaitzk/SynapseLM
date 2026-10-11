@@ -327,11 +327,13 @@ def revoke_share(
 # Access Requests Management
 
 from app.schemas.request import AccessRequestResponse
+from app.models.conversation import RequestStatus, ConversationAccessRequest
 from app.crud import crud_request
 
 @router.get("/{conversation_id}/requests", response_model=List[AccessRequestResponse])
 def get_requests(
     conversation_id: str,
+    status: Optional[RequestStatus] = Query(None),
     db: Session = Depends(deps.get_db),
     current_user = Depends(deps.get_current_user),
 ):
@@ -339,8 +341,18 @@ def get_requests(
     if conv.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the owner can view requests")
         
-    requests = crud_request.get_conversation_requests(db, conversation_id)
+    requests = crud_request.get_conversation_requests(db, conversation_id, status=status)
     return requests
+
+@router.get("/{conversation_id}/branch-request", response_model=Optional[AccessRequestResponse])
+def get_branch_request(
+    conversation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    req = crud_request.get_request_by_branch(db, conversation_id)
+    return req
 
 @router.post("/{conversation_id}/requests/{request_id}/accept", response_model=ConversationParticipantResponse)
 async def accept_request(
@@ -354,14 +366,14 @@ async def accept_request(
         raise HTTPException(status_code=403, detail="Only the owner can accept requests")
         
     # use for_update to lock the request
-    req = db.query(__import__('app.models.conversation', fromlist=['ConversationAccessRequest']).ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
+    req = db.query(ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
     if not req or req.share.conversation_id != conversation_id:
         raise HTTPException(status_code=404, detail="Request not found")
         
     try:
         req = crud_request.accept_request(db, req)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         
     participant = crud_conversation.get_participant(db, conversation_id, req.requester_id)
     
@@ -370,7 +382,10 @@ async def accept_request(
         "event": "request.accepted",
         "conversation_id": conversation_id,
         "request_id": req.id,
-        "requester_id": req.requester_id
+        "requester_id": req.requester_id,
+        "branch_id": req.branch_conversation_id,
+        "conversation_title": conv.title,
+        "status": "accepted"
     })
     # Also broadcast participant.added
     await manager.broadcast_to_conversation(conversation_id, {
@@ -378,12 +393,15 @@ async def accept_request(
         "conversation_id": conversation_id,
         "user_id": req.requester_id
     })
-    # Broadcast to branch conversation so requester gets it
+    # Broadcast to branch conversation so requester gets it in real time
     await manager.broadcast_to_conversation(req.branch_conversation_id, {
         "event": "request.accepted",
         "conversation_id": req.branch_conversation_id,
+        "canonical_conversation_id": conversation_id,
         "request_id": req.id,
-        "requester_id": req.requester_id
+        "requester_id": req.requester_id,
+        "conversation_title": conv.title,
+        "status": "accepted"
     })
     
     return participant
@@ -399,27 +417,33 @@ async def reject_request(
     if conv.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the owner can reject requests")
         
-    req = db.query(__import__('app.models.conversation', fromlist=['ConversationAccessRequest']).ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
+    req = db.query(ConversationAccessRequest).filter_by(id=request_id).with_for_update().first()
     if not req or req.share.conversation_id != conversation_id:
         raise HTTPException(status_code=404, detail="Request not found")
         
     try:
         crud_request.reject_request(db, req)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         
     # Broadcast to parent conversation
     await manager.broadcast_to_conversation(conversation_id, {
         "event": "request.rejected",
         "conversation_id": conversation_id,
         "request_id": req.id,
+        "requester_id": req.requester_id,
+        "branch_id": req.branch_conversation_id,
+        "conversation_title": conv.title,
         "status": "rejected"
     })
-    # Broadcast to branch conversation
+    # Broadcast to branch conversation so requester gets it in real time
     await manager.broadcast_to_conversation(req.branch_conversation_id, {
         "event": "request.rejected",
         "conversation_id": req.branch_conversation_id,
+        "canonical_conversation_id": conversation_id,
         "request_id": req.id,
+        "requester_id": req.requester_id,
+        "conversation_title": conv.title,
         "status": "rejected"
     })
         

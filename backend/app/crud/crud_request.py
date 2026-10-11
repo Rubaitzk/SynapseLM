@@ -23,14 +23,26 @@ def create_request(db: Session, share_id: str, requester_id: str, branch_id: str
 def get_request(db: Session, request_id: str) -> Optional[ConversationAccessRequest]:
     return db.query(ConversationAccessRequest).filter(ConversationAccessRequest.id == request_id).first()
 
-def get_conversation_requests(db: Session, conversation_id: str) -> List[ConversationAccessRequest]:
-    return db.query(ConversationAccessRequest).join(ConversationAccessRequest.share).filter(
+def get_conversation_requests(
+    db: Session, 
+    conversation_id: str, 
+    status: Optional[RequestStatus] = None
+) -> List[ConversationAccessRequest]:
+    query = db.query(ConversationAccessRequest).join(ConversationAccessRequest.share).filter(
         ConversationAccessRequest.share.has(conversation_id=conversation_id)
-    ).all()
+    )
+    if status is not None:
+        query = query.filter(ConversationAccessRequest.status == status)
+    return query.order_by(ConversationAccessRequest.created_at.desc()).all()
+
+def get_request_by_branch(db: Session, branch_conversation_id: str) -> Optional[ConversationAccessRequest]:
+    return db.query(ConversationAccessRequest).filter(
+        ConversationAccessRequest.branch_conversation_id == branch_conversation_id
+    ).order_by(ConversationAccessRequest.created_at.desc()).first()
 
 def cancel_request(db: Session, req: ConversationAccessRequest) -> ConversationAccessRequest:
     if req.status != RequestStatus.pending:
-        raise ValueError("Only pending requests can be cancelled")
+        raise ValueError(f"Only pending requests can be cancelled (current status: {req.status.value})")
     req.status = RequestStatus.cancelled
     db.commit()
     db.refresh(req)
@@ -38,9 +50,7 @@ def cancel_request(db: Session, req: ConversationAccessRequest) -> ConversationA
 
 def reject_request(db: Session, req: ConversationAccessRequest) -> ConversationAccessRequest:
     if req.status != RequestStatus.pending:
-        raise ValueError("Only pending requests can be rejected")
-    # Lock request for state change? Wait, `select for update` should be done when getting the request.
-    # The caller will do `get_request(db, req_id, for_update=True)`. We'll just update it here.
+        raise ValueError(f"Only pending requests can be rejected (current status: {req.status.value})")
     req.status = RequestStatus.rejected
     db.commit()
     db.refresh(req)
@@ -48,7 +58,7 @@ def reject_request(db: Session, req: ConversationAccessRequest) -> ConversationA
 
 def accept_request(db: Session, req: ConversationAccessRequest) -> ConversationAccessRequest:
     if req.status != RequestStatus.pending:
-        raise ValueError("Only pending requests can be accepted")
+        raise ValueError(f"Only pending requests can be accepted (current status: {req.status.value})")
         
     req.status = RequestStatus.accepted
     
@@ -59,8 +69,12 @@ def accept_request(db: Session, req: ConversationAccessRequest) -> ConversationA
         
     canonical_id = req.share.conversation_id
     from app.models.conversation import ConversationParticipant
-    participant = ConversationParticipant(conversation_id=canonical_id, user_id=req.requester_id)
-    db.add(participant)
+    existing_participant = db.query(ConversationParticipant).filter_by(
+        conversation_id=canonical_id, user_id=req.requester_id
+    ).first()
+    if not existing_participant:
+        participant = ConversationParticipant(conversation_id=canonical_id, user_id=req.requester_id)
+        db.add(participant)
     
     db.commit()
     db.refresh(req)
