@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { MessageSquare, Users, LogOut, Menu, ChevronDown, ChevronRight, Settings, Plus, Search, PanelLeft } from 'lucide-react';
+import { useNotifications } from '../../context/NotificationContext';
+import { MessageSquare, Users, LogOut, Menu, ChevronDown, ChevronRight, Settings, Plus, Search, PanelLeft, MailOpen } from 'lucide-react';
 import api from '../../lib/api';
+import { NotificationDropdown } from '../notifications/NotificationDropdown';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const { unreadCount } = useNotifications();
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -48,33 +51,60 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Mobile Header */}
       <div className="md:hidden absolute top-0 left-0 right-0 z-20 flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3">
         <h1 className="text-xl font-bold text-gray-900">SynapseLM</h1>
-        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="text-gray-600">
-          <Menu size={24} />
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationDropdown />
+          <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="text-gray-600 p-1">
+            <Menu size={24} />
+          </button>
+        </div>
       </div>
 
       {/* Sidebar */}
       <div className={`${mobileMenuOpen ? 'flex' : 'hidden'} md:flex flex-col ${sidebarCollapsed ? 'w-16' : 'w-64'} transition-all duration-200 bg-gray-50 border-r border-gray-200 h-full absolute md:relative z-10 shrink-0 overflow-hidden`}>
         <div className="p-4 hidden md:flex items-center justify-between">
           {!sidebarCollapsed && <h1 className="text-xl font-bold text-gray-900 truncate">SynapseLM</h1>}
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="text-gray-500 hover:text-gray-900 ml-auto">
-            <PanelLeft size={20} />
-          </button>
+          <div className="flex items-center gap-1 ml-auto">
+            <NotificationDropdown />
+            <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="text-gray-500 hover:text-gray-900 p-1" title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+              <PanelLeft size={20} />
+            </button>
+          </div>
         </div>
         
-        <div className="px-3 py-2 mt-12 md:mt-0">
+        <div className="px-3 py-2 space-y-1 mt-12 md:mt-0">
           <button
             onClick={() => {
               navigate('/');
               setMobileMenuOpen(false);
             }}
-            className={`flex items-center justify-between w-full py-2.5 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 shadow-sm transition-colors ${sidebarCollapsed ? "px-2" : "px-4"}`}
+            className={`flex items-center justify-between w-full py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 shadow-sm transition-colors ${sidebarCollapsed ? "px-2" : "px-3"}`}
           >
             <span className="flex items-center justify-center w-full">
-              <Plus size={18} className={sidebarCollapsed ? "" : "mr-2"} />
+              <Plus size={18} className={sidebarCollapsed ? "" : "mr-2 text-blue-600"} />
               {!sidebarCollapsed && "New Chat"}
             </span>
           </button>
+
+          <Link
+            to="/invitations"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center justify-between w-full py-2 text-sm font-medium rounded-lg transition-colors ${
+              location.pathname === '/invitations'
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            } ${sidebarCollapsed ? "px-2 justify-center" : "px-3"}`}
+            title="Invitations"
+          >
+            <div className="flex items-center">
+              <MailOpen size={18} className={sidebarCollapsed ? "" : "mr-2.5 text-gray-500"} />
+              {!sidebarCollapsed && <span>Invitations</span>}
+            </div>
+            {!sidebarCollapsed && unreadCount > 0 && (
+              <span className="px-2 py-0.5 text-xs font-bold bg-blue-600 text-white rounded-full">
+                {unreadCount}
+              </span>
+            )}
+          </Link>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 mt-2">

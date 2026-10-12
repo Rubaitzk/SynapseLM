@@ -14,7 +14,7 @@ import { Modal } from '../components/ui/Modal';
 
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare, Share2, Copy, Check, Clock, GitFork, CheckCircle, X } from 'lucide-react';
+import { Trash2, Send, Users, PanelRight, AlertCircle, Cpu, MessageSquare, Share2, Copy, Check, Clock, GitFork, CheckCircle, X, Pencil, History, GitBranch, AlertTriangle } from 'lucide-react';
 
 export default function ConversationView() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +23,7 @@ export default function ConversationView() {
   const { user } = useAuth();
 
   const [conversation, setConversation] = useState<any>(null);
+  const [branches, setBranches] = useState<any[]>([]);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareLink, setShareLink] = useState('');
@@ -79,7 +80,107 @@ export default function ConversationView() {
 
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
 
+  // Message Editing state
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editExpectedVersion, setEditExpectedVersion] = useState(1);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editConflict, setEditConflict] = useState<{
+    messageId: string;
+    currentVersion: number;
+    currentContent: string;
+  } | null>(null);
 
+  // Message Edit History Modal state
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyMessage, setHistoryMessage] = useState<any>(null);
+  const [historyEntries, setHistoryEntries] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const handleStartEdit = (msg: any) => {
+    setEditingMessageId(msg.id);
+    setEditDraft(msg.content);
+    setEditExpectedVersion(msg.version || 1);
+    setEditConflict(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditDraft('');
+    setEditExpectedVersion(1);
+    setEditConflict(null);
+  };
+
+  const handleSaveEdit = async (msg: any) => {
+    if (!editDraft.trim() || isSavingEdit) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await api.patch(`/conversations/${id}/messages/${msg.id}`, {
+        content: editDraft.trim(),
+        expected_version: editExpectedVersion,
+        regenerate: true,
+      });
+      setMessages(prev => {
+        const updated = prev.map(m => m.id === msg.id ? res.data : m);
+        const idx = updated.findIndex(m => m.id === msg.id);
+        if (idx !== -1 && idx + 1 < updated.length && updated[idx + 1].sender_type === 'assistant') {
+          return updated.filter((_, i) => i !== idx + 1);
+        }
+        return updated;
+      });
+      handleCancelEdit();
+      addToast('Message updated. Generating new response...', 'success');
+    } catch (err: any) {
+      if (err.response?.status === 409) {
+        const detail = err.response.data?.detail;
+        const currentVersion = (typeof detail === 'object' && detail?.current_version) ? detail.current_version : ((msg.version || 1) + 1);
+        const currentContent = (typeof detail === 'object' && detail?.current_content) ? detail.current_content : '';
+        setEditConflict({
+          messageId: msg.id,
+          currentVersion,
+          currentContent,
+        });
+        addToast('Conflict detected: This message was modified by another session.', 'error');
+      } else {
+        addToast(err.response?.data?.detail || 'Failed to edit message', 'error');
+      }
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleEditAndContinue = async (msg: any) => {
+    if (!editDraft.trim() || isSavingEdit) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await api.post(`/conversations/${id}/messages/${msg.id}/continue`, {
+        content: editDraft.trim(),
+      });
+      handleCancelEdit();
+      addToast('Created new branch! Navigating to branch...', 'success');
+      const targetId = res.data?.conversation?.id || res.data?.id;
+      navigate(`/conversations/${targetId}`);
+    } catch (err: any) {
+      addToast(err.response?.data?.detail || 'Failed to continue conversation', 'error');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleOpenHistory = async (msg: any) => {
+    setHistoryMessage(msg);
+    setHistoryModalOpen(true);
+    setHistoryLoading(true);
+    setHistoryEntries([]);
+    try {
+      const res = await api.get(`/conversations/${id}/messages/${msg.id}/history`);
+      setHistoryEntries(res.data);
+    } catch (err: any) {
+      addToast('Failed to load edit history', 'error');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -124,6 +225,13 @@ export default function ConversationView() {
         setTeamMembers(membersRes.data);
       } else {
         setTeamMembers([]);
+      }
+
+      try {
+        const branchesRes = await api.get(`/conversations/${id}/branches`);
+        setBranches(branchesRes.data || []);
+      } catch {
+        // ignore
       }
 
     } catch (err: any) {
@@ -396,6 +504,18 @@ export default function ConversationView() {
 
              });
 
+          } else if (data.event === 'message.updated') {
+            setMessages(prev => prev.map(m => m.id === data.message.id ? { ...m, ...data.message } : m));
+            if (editingMessageId === data.message.id && data.message.version > editExpectedVersion) {
+              setEditConflict({
+                messageId: data.message.id,
+                currentVersion: data.message.version,
+                currentContent: data.message.content,
+              });
+              addToast('This message was updated by another participant while you were editing.', 'info');
+            }
+          } else if (data.event === 'conversation.continued') {
+            addToast(`Conversation was continued by ${data.creator_id === user?.id ? 'you' : 'a team member'}`, 'info');
           } else if (data.event === 'assistant.response.started') {
 
              setStreamingMessages(prev => ({...prev, [data.message_id]: {content: ''}}));
@@ -837,7 +957,30 @@ export default function ConversationView() {
             </div>
 
             <div className="flex items-center gap-2">
-              {isBranch && (
+              {branches.length > 1 && (
+                <div className="flex items-center gap-1.5 bg-purple-50 text-purple-900 px-2.5 py-1 rounded-lg text-xs font-medium border border-purple-200">
+                  <GitBranch size={13} className="text-purple-600 shrink-0" />
+                  <span className="text-purple-700 font-semibold">Branch:</span>
+                  <select
+                    value={id}
+                    onChange={(e) => navigate(`/conversations/${e.target.value}`)}
+                    className="bg-transparent text-xs font-semibold text-purple-900 focus:outline-none cursor-pointer pr-1"
+                  >
+                    {branches.map((b, idx) => {
+                      const isCurrent = b.id === id;
+                      const isRoot = !b.parent_conversation_id;
+                      const label = isRoot ? 'Main (Original)' : `Branch ${idx}`;
+                      return (
+                        <option key={b.id} value={b.id}>
+                          {label} {isCurrent ? '• Active' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {isBranch && branches.length <= 1 && (
                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
                   <GitFork size={12} className="mr-1" />
                   Branch
@@ -934,43 +1077,152 @@ export default function ConversationView() {
 
             
 
-            {messages.map(msg => (
+            {messages.map((msg, index) => {
+              const isCurrentUser = msg.sender_type === 'user' && msg.sender_id === user?.id;
+              const isEligibleToEdit = isCurrentUser && !isArchived;
+              const isEditingThis = editingMessageId === msg.id;
+              const hasSubsequent = index < messages.length - 1;
 
-              <div key={msg.id} className={`flex flex-col ${msg.sender_type === 'user' ? 'items-end' : 'items-start'}`}>
+              return (
+                <div key={msg.id} className={`flex flex-col group ${msg.sender_type === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className="flex items-center mb-1 mx-1 space-x-2">
+                    <span className="text-sm font-medium text-gray-700">
+                      {msg.sender_type === 'user' ? (msg.sender?.username || 'User') : 'SynapseLM'}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {msg.is_edited && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenHistory(msg)}
+                        className="inline-flex items-center text-[11px] text-gray-500 hover:text-blue-600 transition-colors cursor-pointer bg-gray-100 hover:bg-blue-50 px-1.5 py-0.5 rounded border border-gray-200"
+                        title={`Edited at ${msg.edited_at ? new Date(msg.edited_at).toLocaleString() : ''}. Click to view history.`}
+                      >
+                        <History size={11} className="mr-1" />
+                        (edited v{msg.version || 1})
+                      </button>
+                    )}
+                    {isEligibleToEdit && !isEditingThis && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(msg)}
+                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-gray-100 transition-all text-xs flex items-center"
+                        title="Edit message"
+                      >
+                        <Pencil size={12} className="mr-0.5" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                  </div>
 
-                <div className="flex items-baseline mb-1 mx-1">
+                  {isEditingThis ? (
+                    <div className="w-full max-w-2xl bg-white border-2 border-blue-400 rounded-2xl p-4 shadow-md space-y-3 my-1">
+                      <div className="flex items-center justify-between text-xs text-gray-500 pb-2 border-b border-gray-100">
+                        <span className="font-semibold text-blue-700 flex items-center">
+                          <Pencil size={12} className="mr-1.5" />
+                          Editing message (v{msg.version || 1})
+                        </span>
+                        {hasSubsequent && (
+                          <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-medium border border-amber-200">
+                            Subsequent replies exist
+                          </span>
+                        )}
+                      </div>
 
-                  <span className="text-sm font-medium text-gray-700 mr-2">
+                      {editConflict && (
+                        <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 space-y-2">
+                          <div className="flex items-center font-bold text-amber-800">
+                            <AlertTriangle size={14} className="mr-1.5 text-amber-600 shrink-0" />
+                            Conflict: Message was updated on the server to version {editConflict.currentVersion}
+                          </div>
+                          {editConflict.currentContent && (
+                            <div className="p-2 bg-white rounded border border-amber-200 font-mono text-[11px] text-gray-700 max-h-24 overflow-y-auto">
+                              {editConflict.currentContent}
+                            </div>
+                          )}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditExpectedVersion(editConflict.currentVersion);
+                                setEditConflict(null);
+                              }}
+                              className="px-2.5 py-1 bg-amber-600 text-white font-medium rounded hover:bg-amber-700 text-xs"
+                            >
+                              Overwrite with my draft
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditDraft(editConflict.currentContent);
+                                setEditExpectedVersion(editConflict.currentVersion);
+                                setEditConflict(null);
+                              }}
+                              className="px-2.5 py-1 bg-white border border-amber-300 text-amber-800 font-medium rounded hover:bg-amber-100 text-xs"
+                            >
+                              Load server content
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
-                    {msg.sender_type === 'user' ? (msg.sender?.username || 'User') : 'SynapseLM'}
+                      <textarea
+                        value={editDraft}
+                        onChange={(e) => setEditDraft(e.target.value)}
+                        rows={3}
+                        className="w-full p-2.5 text-sm text-gray-800 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-y"
+                        placeholder="Edit your message..."
+                        autoFocus
+                      />
 
-                  </span>
-
-                  <span className="text-xs text-gray-400">
-
-                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-
-                  </span>
-
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="text-[11px] text-gray-400">
+                          {editDraft.length} characters
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCancelEdit}
+                            disabled={isSavingEdit}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveEdit(msg)}
+                            disabled={isSavingEdit || !editDraft.trim() || editDraft.trim() === msg.content}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                          >
+                            {isSavingEdit ? 'Regenerating...' : 'Save & Regenerate'}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleEditAndContinue(msg)}
+                            disabled={isSavingEdit || !editDraft.trim()}
+                            className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 flex items-center gap-1 font-medium"
+                            title="Creates a branch from before this message with your edits, keeping original history intact."
+                          >
+                            <GitBranch size={13} className="text-purple-600" />
+                            <span>Branch & Continue</span>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-sm ${
+                      msg.sender_type === 'user' 
+                        ? 'bg-blue-600 text-white rounded-tr-sm' 
+                        : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'
+                    }`}>
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                  )}
                 </div>
-
-                <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-sm ${
-
-                  msg.sender_type === 'user' 
-
-                    ? 'bg-blue-600 text-white rounded-tr-sm' 
-
-                    : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'
-
-                }`}>
-
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
-
-                </div>
-
-              </div>
-
-            ))}
+              );
+            })}
 
             
 
@@ -1470,6 +1722,79 @@ export default function ConversationView() {
 
           <div className="flex justify-end pt-2 border-t border-gray-100">
             <Button variant="ghost" onClick={() => setShareModalOpen(false)}>Close</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Message Edit History Modal */}
+      <Modal 
+        isOpen={historyModalOpen} 
+        onClose={() => { setHistoryModalOpen(false); setHistoryMessage(null); }} 
+        title="Message Edit History"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-xs text-gray-500 pb-2 border-b border-gray-100">
+            <span>Message ID: <code className="font-mono text-gray-700">{historyMessage?.id ? `${historyMessage.id.slice(0, 8)}...` : ''}</code></span>
+            <span className="font-semibold text-blue-600">Current version: v{historyMessage?.version || 1}</span>
+          </div>
+
+          {historyLoading ? (
+            <div className="py-8 text-center text-gray-400 text-sm">Loading edit history...</div>
+          ) : historyEntries.length === 0 ? (
+            <div className="py-6 text-center text-gray-500 text-sm">
+              <p>No previous edits recorded for this message.</p>
+              <p className="text-xs text-gray-400 mt-1">This message is at version 1.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {/* Current Version */}
+              <div className="p-3 bg-blue-50/50 border border-blue-200 rounded-lg text-xs">
+                <div className="flex items-center justify-between font-semibold text-blue-900 mb-1">
+                  <span>Version {historyMessage?.version} (Current)</span>
+                  <span className="text-gray-500 font-normal">
+                    {historyMessage?.edited_at ? new Date(historyMessage.edited_at).toLocaleString() : (historyMessage?.created_at ? new Date(historyMessage.created_at).toLocaleString() : '')}
+                  </span>
+                </div>
+                <div className="p-2 bg-white rounded border border-blue-100 text-gray-800 whitespace-pre-wrap">
+                  {historyMessage?.content}
+                </div>
+              </div>
+
+              {/* Historical Versions */}
+              {historyEntries.map((entry) => (
+                <div key={entry.id} className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs space-y-2">
+                  <div className="flex items-center justify-between font-medium text-gray-700">
+                    <span className="font-semibold text-gray-900">Version {entry.version}</span>
+                    <span className="text-gray-400">
+                      {new Date(entry.edited_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-medium text-gray-500 mb-0.5">Prompt:</div>
+                    <div className="p-2 bg-white rounded border border-gray-200 text-gray-700 whitespace-pre-wrap">
+                      {entry.content}
+                    </div>
+                  </div>
+                  {entry.ai_response_content && (
+                    <div>
+                      <div className="text-[11px] font-semibold text-blue-700 mb-0.5 flex items-center">
+                        <Cpu size={12} className="mr-1 text-blue-600" />
+                        Paired AI Response:
+                      </div>
+                      <div className="p-2 bg-blue-50/50 rounded border border-blue-100 text-gray-700 whitespace-pre-wrap">
+                        {entry.ai_response_content}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t border-gray-100">
+            <Button variant="ghost" onClick={() => { setHistoryModalOpen(false); setHistoryMessage(null); }}>
+              Close
+            </Button>
           </div>
         </div>
       </Modal>

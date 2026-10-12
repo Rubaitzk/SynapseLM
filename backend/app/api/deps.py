@@ -38,4 +38,10 @@ def get_current_user(
     user = db.query(User).filter(User.id == token_data.sub).first()
     if user is None:
         raise credentials_exception
+        
+    token_tv = payload.get("tv")
+    if token_tv is not None and getattr(user, "token_version", None) is not None:
+        if token_tv != user.token_version:
+            raise credentials_exception
+            
     return user

@@ -35,6 +35,7 @@ class ConversationResponse(ConversationBase):
     ai_temperature: float
     parent_conversation_id: Optional[str] = None
     snapshot_sequence_id: Optional[int] = None
+    continuation_from_message_id: Optional[str] = None
     lifecycle_state: LifecycleState = LifecycleState.active
 
     class Config:
@@ -59,10 +60,54 @@ class MessageCreate(MessageBase):
 class MessageResponse(MessageBase):
     id: str
     conversation_id: str
+    sequence_id: Optional[int] = None
     sender_id: Optional[str] = None
     sender_type: SenderType
+    version: int = 1
+    is_edited: bool = False
+    edited_at: Optional[datetime] = None
+    edited_by_id: Optional[str] = None
     created_at: datetime
     sender: Optional[UserResponse] = None
+
+    class Config:
+        from_attributes = True
+
+class MessageEdit(BaseModel):
+    content: str
+    expected_version: int
+    regenerate: Optional[bool] = True
+
+class MessageEditHistoryResponse(BaseModel):
+    id: str
+    message_id: str
+    version: int
+    content: str
+    ai_response_content: Optional[str] = None
+    editor_id: Optional[str] = None
+    edited_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class MessageContinue(BaseModel):
+    content: str
+    title: Optional[str] = None
+
+class MessageEditAndRegenerateResponse(BaseModel):
+    action: str # "updated" or "branched"
+    conversation_id: str
+    root_conversation_id: Optional[str] = None
+    message: MessageResponse
+
+class ConversationBranchResponse(BaseModel):
+    id: str
+    title: str
+    parent_conversation_id: Optional[str] = None
+    continuation_from_message_id: Optional[str] = None
+    snapshot_sequence_id: Optional[int] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True

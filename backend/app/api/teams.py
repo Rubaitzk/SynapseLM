@@ -1,12 +1,13 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from app.api import deps
 from app.crud import crud_team, crud_user
 from app.schemas.team import TeamCreate, TeamResponse, TeamMembershipResponse, InvitationCreate, InvitationResponse
-from app.models.team import Role
+from app.models.team import Role, InvitationStatus
+from app.core.realtime import manager
 
 router = APIRouter()
 
@@ -62,8 +63,20 @@ def get_team_conversations(
         raise HTTPException(status_code=403, detail="Not a member of this team")
     return crud_conversation.get_team_conversations(db, team_id=team_id, user_id=current_user.id)
 
+@router.get("/{team_id}/invitations", response_model=List[InvitationResponse])
+def get_team_invitations(
+    team_id: str,
+    status: Optional[str] = Query(None, description="Filter by status: pending, accepted, rejected, cancelled, expired, or all"),
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    membership = crud_team.get_team_membership(db, team_id=team_id, user_id=current_user.id)
+    if not membership or membership.role not in [Role.owner, Role.admin]:
+        raise HTTPException(status_code=403, detail="Not enough permissions to view team invitations")
+    return crud_team.get_team_invitations(db, team_id=team_id, status_filter=status)
+
 @router.post("/{team_id}/invitations", response_model=InvitationResponse)
-def invite_member(
+async def invite_member(
     team_id: str,
     invitation_in: InvitationCreate,
     db: Session = Depends(deps.get_db),
@@ -89,7 +102,68 @@ def invite_member(
         if expires_at > datetime.now(timezone.utc):
             raise HTTPException(status_code=400, detail="A pending invitation already exists for this email")
 
-    return crud_team.create_invitation(db, invitation=invitation_in, team_id=team_id, inviter_id=current_user.id)
+    invitation = crud_team.create_invitation(db, invitation=invitation_in, team_id=team_id, inviter_id=current_user.id)
+
+    # Realtime notification to invitee if they are registered
+    await manager.broadcast_to_user(user.id, {
+        "event": "team.invitation.created",
+        "invitation_id": invitation.id,
+        "team_id": team_id,
+        "team_name": invitation.team.name if invitation.team else None,
+        "inviter_name": current_user.username,
+        "role": invitation.role.value
+    })
+
+    # Realtime notification to team channel
+    await manager.broadcast_to_team(team_id, {
+        "event": "team.invitation.created",
+        "invitation_id": invitation.id,
+        "team_id": team_id,
+        "invitee_email": invitation.invitee_email,
+        "role": invitation.role.value
+    })
+
+    return invitation
+
+@router.post("/{team_id}/invitations/{invitation_id}/cancel", response_model=InvitationResponse)
+@router.delete("/{team_id}/invitations/{invitation_id}", response_model=InvitationResponse)
+async def cancel_team_invitation(
+    team_id: str,
+    invitation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    membership = crud_team.get_team_membership(db, team_id=team_id, user_id=current_user.id)
+    if not membership or membership.role not in [Role.owner, Role.admin]:
+        raise HTTPException(status_code=403, detail="Not enough permissions to cancel invitations")
+
+    invitation = crud_team.get_invitation(db, invitation_id=invitation_id)
+    if not invitation or invitation.team_id != team_id:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+
+    if invitation.status != InvitationStatus.pending:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel invitation with status: {invitation.status.value}")
+
+    cancelled = crud_team.cancel_invitation(db, invitation=invitation)
+
+    # Notify recipient if registered
+    invitee = crud_user.get_user_by_email(db, email=invitation.invitee_email)
+    if invitee:
+        await manager.broadcast_to_user(invitee.id, {
+            "event": "team.invitation.cancelled",
+            "invitation_id": invitation.id,
+            "team_id": team_id,
+            "team_name": invitation.team.name if invitation.team else None
+        })
+
+    # Notify team channel
+    await manager.broadcast_to_team(team_id, {
+        "event": "team.invitation.cancelled",
+        "invitation_id": invitation.id,
+        "team_id": team_id
+    })
+
+    return cancelled
 
 @router.delete("/{team_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_team_member(

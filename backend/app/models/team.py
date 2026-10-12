@@ -15,6 +15,7 @@ class InvitationStatus(str, enum.Enum):
     accepted = "accepted"
     rejected = "rejected"
     expired = "expired"
+    cancelled = "cancelled"
 
 class Team(Base):
     __tablename__ = "teams"

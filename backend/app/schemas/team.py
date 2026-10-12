@@ -47,6 +47,10 @@ class InvitationResponse(BaseModel):
     created_at: datetime
     team: Optional[TeamResponse] = None
     inviter: Optional[UserResponse] = None
+    invitee_name: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class UnreadInvitationsCount(BaseModel):
+    count: int

@@ -19,7 +19,46 @@ async def get_current_user_ws(token: str, db: Session):
         return None
     from app.crud.crud_user import get_user
     user = get_user(db, user_id=user_id)
+    if not user:
+        return None
+    token_tv = payload.get("tv")
+    if token_tv is not None and getattr(user, "token_version", None) is not None:
+        if token_tv != user.token_version:
+            return None
     return user
+
+@router.websocket("/ws/notifications")
+@router.websocket("/ws/notifications/")
+@router.websocket("/ws/user")
+@router.websocket("/ws/user/")
+async def notifications_websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(...),
+    db: Session = Depends(deps.get_db)
+):
+    user = await get_current_user_ws(token, db)
+    if not user:
+        await websocket.close(code=1008)
+        return
+
+    from app.crud.crud_team import get_user_teams
+    teams = get_user_teams(db, user.id)
+    team_ids = [t.id for t in teams]
+
+    connection_id = str(uuid.uuid4())
+    await manager.connect_user(websocket, user.id, user.username, connection_id, team_ids=team_ids)
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(connection_id)
 
 @router.websocket("/ws/{conversation_id}")
 async def websocket_endpoint(
@@ -73,8 +112,6 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         manager.disconnect(connection_id, conversation_id)
         # Broadcast presence.left
-        # But wait, what if the user still has another connection?
-        # A simple presence implementation: if no other connection for this user in this conversation...
         has_other_connections = False
         for c_id in manager.conversation_subscriptions.get(conversation_id, []):
             if manager.connection_users.get(c_id) == user.id:
@@ -95,5 +132,6 @@ async def websocket_endpoint(
                 "user_id": user.id,
                 "user_name": user.username
             })
+
 
 

@@ -10,6 +10,10 @@ from app.schemas.conversation import (
     ConversationParticipantResponse,
     MessageCreate,
     MessageResponse,
+    MessageEdit,
+    MessageEditHistoryResponse,
+    MessageContinue,
+    ConversationBranchResponse,
     PaginatedMessages
 )
 from app.schemas.user import UserResponse
@@ -61,6 +65,15 @@ def get_conversation(
     current_user = Depends(deps.get_current_user),
 ):
     return check_conversation_access(db, conversation_id, current_user.id)
+
+@router.get("/{conversation_id}/branches", response_model=List[ConversationBranchResponse])
+def get_conversation_branches(
+    conversation_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    check_conversation_access(db, conversation_id, current_user.id)
+    return crud_conversation.get_conversation_branches(db, conversation_id)
 
 @router.patch("/{conversation_id}", response_model=ConversationResponse)
 def update_conversation(
@@ -249,6 +262,177 @@ async def get_messages(
         "page": page,
         "size": size,
         "items": items
+    }
+
+@router.patch("/{conversation_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_message(
+    conversation_id: str,
+    message_id: str,
+    edit_in: MessageEdit,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    
+    from app.models.conversation import LifecycleState, SenderType
+    if conv.lifecycle_state != LifecycleState.active:
+        raise HTTPException(status_code=400, detail="Cannot edit messages in an archived or deleted conversation")
+        
+    if not edit_in.content or not edit_in.content.strip():
+        raise HTTPException(status_code=400, detail="Message content cannot be empty")
+        
+    msg = crud_conversation.get_message(db, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if msg.conversation_id != conversation_id:
+        if not (conv.parent_conversation_id and msg.conversation_id == conv.parent_conversation_id and msg.sequence_id <= (conv.snapshot_sequence_id or 0)):
+            raise HTTPException(status_code=404, detail="Message not found in this conversation")
+            
+    if msg.sender_id != current_user.id or msg.sender_type != SenderType.user:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this message")
+
+    # Look for following assistant responses to this message before any subsequent user message
+    next_user_msg = (
+        db.query(crud_conversation.Message)
+        .filter(
+            crud_conversation.Message.conversation_id == conversation_id,
+            crud_conversation.Message.sequence_id > msg.sequence_id,
+            crud_conversation.Message.sender_type == SenderType.user
+        )
+        .order_by(crud_conversation.Message.sequence_id.asc())
+        .first()
+    )
+    max_seq_to_clean = next_user_msg.sequence_id if next_user_msg else 999999999
+
+    following_ai_msgs = (
+        db.query(crud_conversation.Message)
+        .filter(
+            crud_conversation.Message.conversation_id == conversation_id,
+            crud_conversation.Message.sequence_id > msg.sequence_id,
+            crud_conversation.Message.sequence_id < max_seq_to_clean,
+            crud_conversation.Message.sender_type == SenderType.assistant
+        )
+        .order_by(crud_conversation.Message.sequence_id.asc())
+        .all()
+    )
+    ai_response_content = following_ai_msgs[0].content if following_ai_msgs else None
+
+    updated_msg, err, current_msg = crud_conversation.edit_message(
+        db,
+        message_id=message_id,
+        new_content=edit_in.content,
+        expected_version=edit_in.expected_version,
+        editor_id=current_user.id,
+        ai_response_content=ai_response_content
+    )
+    
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="Message not found")
+    if err == "conflict":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"Conflict: Message was updated by another session. Current version is {current_msg.version}.",
+                "current_version": current_msg.version,
+                "current_content": current_msg.content
+            }
+        )
+
+    # If regenerate requested: remove the stale following assistant message(s) & trigger new generation
+    if edit_in.regenerate:
+        for s_ai in following_ai_msgs:
+            stale_id = s_ai.id
+            db.delete(s_ai)
+            db.commit()
+            await manager.broadcast_to_conversation(conversation_id, {
+                "event": "message.deleted",
+                "conversation_id": conversation_id,
+                "message_id": stale_id
+            })
+
+        from app.services.llm.orchestrator import generate_assistant_response
+        background_tasks.add_task(generate_assistant_response, db, conversation_id, current_user.id)
+        
+    message_data = MessageResponse.model_validate(updated_msg).model_dump(mode='json')
+    
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "message.updated",
+        "conversation_id": conversation_id,
+        "message_id": updated_msg.id,
+        "message": message_data
+    })
+    
+    return updated_msg
+
+@router.get("/{conversation_id}/messages/{message_id}/history", response_model=List[MessageEditHistoryResponse])
+def get_message_history(
+    conversation_id: str,
+    message_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    msg = crud_conversation.get_message(db, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if msg.conversation_id != conversation_id:
+        if not (conv.parent_conversation_id and msg.conversation_id == conv.parent_conversation_id and msg.sequence_id <= (conv.snapshot_sequence_id or 0)):
+            raise HTTPException(status_code=404, detail="Message not found in this conversation")
+            
+    return crud_conversation.get_message_edit_history(db, message_id)
+
+@router.post("/{conversation_id}/messages/{message_id}/continue")
+async def continue_from_message(
+    conversation_id: str,
+    message_id: str,
+    continue_in: MessageContinue,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_user = Depends(deps.get_current_user),
+):
+    conv = check_conversation_access(db, conversation_id, current_user.id)
+    
+    from app.models.conversation import LifecycleState
+    if conv.lifecycle_state != LifecycleState.active:
+        raise HTTPException(status_code=400, detail="Cannot create continuation from an archived or deleted conversation")
+        
+    if not continue_in.content or not continue_in.content.strip():
+        raise HTTPException(status_code=400, detail="Continuation content cannot be empty")
+        
+    msg = crud_conversation.get_message(db, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    try:
+        new_branch, new_msg = crud_conversation.create_continuation(
+            db,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            new_content=continue_in.content,
+            user_id=current_user.id,
+            title=continue_in.title
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    await manager.broadcast_to_conversation(conversation_id, {
+        "event": "conversation.continued",
+        "conversation_id": conversation_id,
+        "continuation_id": new_branch.id,
+        "continuation_title": new_branch.title,
+        "from_message_id": message_id,
+        "created_by": current_user.id
+    })
+    
+    from app.services.llm.orchestrator import generate_assistant_response
+    background_tasks.add_task(generate_assistant_response, db, new_branch.id, current_user.id)
+    
+    return {
+        "conversation": ConversationResponse.model_validate(new_branch),
+        "message": MessageResponse.model_validate(new_msg)
     }
 
 @router.get("/{conversation_id}/presence")

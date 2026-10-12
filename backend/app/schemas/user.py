@@ -24,3 +24,16 @@ class UserInDBBase(UserBase):
 
 class UserResponse(UserInDBBase):
     pass
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class VerifyResetTokenRequest(BaseModel):
+    token: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class PasswordResetResponse(BaseModel):
+    message: str

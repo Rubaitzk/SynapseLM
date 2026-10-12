@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, Enum, Text, Float, Integer, Boolean, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -39,6 +40,7 @@ class Conversation(Base):
     # Branch Metadata
     parent_conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
     snapshot_sequence_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    continuation_from_message_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
     lifecycle_state: Mapped[LifecycleState] = mapped_column(Enum(LifecycleState), nullable=False, default=LifecycleState.active)
 
     # AI Configuration
@@ -50,7 +52,7 @@ class Conversation(Base):
 
     team = relationship("Team")
     participants = relationship("ConversationParticipant", back_populates="conversation", cascade="all, delete-orphan")
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.sequence_id.asc()")
+    messages = relationship("Message", back_populates="conversation", foreign_keys="Message.conversation_id", cascade="all, delete-orphan", order_by="Message.sequence_id.asc()")
     shares = relationship("ConversationShare", back_populates="conversation", cascade="all, delete-orphan")
     access_requests = relationship("ConversationAccessRequest", foreign_keys="ConversationAccessRequest.branch_conversation_id", back_populates="branch_conversation", cascade="all, delete-orphan")
 
@@ -79,10 +81,35 @@ class Message(Base):
     sender_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     sender_type: Mapped[SenderType] = mapped_column(Enum(SenderType), nullable=False, default=SenderType.user)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    edited_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    edited_by_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
-    conversation = relationship("Conversation", back_populates="messages")
-    sender = relationship("User")
+    conversation = relationship("Conversation", back_populates="messages", foreign_keys=[conversation_id])
+    sender = relationship("User", foreign_keys=[sender_id])
+    edited_by = relationship("User", foreign_keys=[edited_by_id])
+    edit_history = relationship("MessageEditHistory", back_populates="message", cascade="all, delete-orphan", order_by="MessageEditHistory.version.desc()")
+
+class MessageEditHistory(Base):
+    __tablename__ = "message_edit_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    message_id: Mapped[str] = mapped_column(String, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_response_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    editor_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    edited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    message = relationship("Message", back_populates="edit_history")
+    editor = relationship("User")
+
+    __table_args__ = (
+        Index("ix_message_edit_history_msg_ver", "message_id", "version"),
+    )
 
 class ConversationShare(Base):
     __tablename__ = "conversation_shares"
